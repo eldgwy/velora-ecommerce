@@ -12,7 +12,7 @@ const Search = ({
   return (
     <div
       className="
-        fixed inset-0 z-[60]
+        fixed inset-0 z-60
         flex items-start justify-center
         bg-black/20
         p-4 pt-24
