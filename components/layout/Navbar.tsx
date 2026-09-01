@@ -1,6 +1,6 @@
 "use client";
 
-import { NAV_LINKS } from "@/constants/Links";
+import { NAV_LINKS } from "@/constants";
 import Link from "next/link";
 import Search from "../Search";
 import { Button } from "../ui/button";

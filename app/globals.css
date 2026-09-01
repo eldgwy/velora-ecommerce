@@ -304,6 +304,13 @@
     backdrop-filter: blur(32px);
     -webkit-backdrop-filter: blur(32px);
   }
+
+  .hero #head-1,
+  .hero #head-2,
+  .hero #head-3,
+  .hero #hero-cta {
+    visibility: hidden;
+  }
 }
 
 /* ========================================
