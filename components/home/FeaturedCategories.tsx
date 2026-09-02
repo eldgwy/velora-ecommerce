@@ -6,7 +6,9 @@ import { categories } from "@/constants";
 import { useRef } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { ScrollTrigger } from "gsap/all";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+gsap.registerPlugin(ScrollTrigger);
 
 const FeaturedCategories = () => {
   const sectionRef = useRef<HTMLElement>(null);
@@ -15,8 +17,6 @@ const FeaturedCategories = () => {
 
   useGSAP(
     () => {
-      gsap.registerPlugin(ScrollTrigger);
-
       const section = sectionRef.current;
       if (!section) return;
 

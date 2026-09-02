@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DM_Serif_Display, Manrope } from "next/font/google";
 import "./globals.css";
+import SmoothScroll from "@/components/providers/SmoothScroll";
 
 const displayFont = DM_Serif_Display({
   variable: "--font-display",
@@ -29,7 +30,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${displayFont.variable} ${sansFont.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <SmoothScroll />
+        {children}
+      </body>
     </html>
   );
 }

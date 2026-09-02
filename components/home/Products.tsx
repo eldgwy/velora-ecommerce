@@ -15,15 +15,15 @@ import { Products as ProductsList, type Product } from "@/constants";
 import { useRef } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { ScrollTrigger } from "gsap/all";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+gsap.registerPlugin(ScrollTrigger);
 
 const Products = () => {
   const sectionRef = useRef<HTMLElement>(null);
 
   useGSAP(
     () => {
-      gsap.registerPlugin(ScrollTrigger);
-
       const section = sectionRef.current;
       if (!section) return;
 
@@ -216,13 +216,13 @@ const Products = () => {
         </div>
 
         {/* Product Grid */}
-        <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-4 lg:gap-x-5 lg:gap-y-10">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-6 lg:gap-x-5 lg:gap-y-10">
           {ProductsList.map((product: Product) => (
             <article key={product.id} className="product-card group min-w-0">
               {/* Product Image */}
               <div className="relative overflow-hidden rounded-xl bg-surface-muted">
                 <Link href={`/products/${product.id}`}>
-                  <div className="relative aspect-4/5 product-image">
+                  <div className="relative aspect-4/5 overflow-hidden">
                     <Image
                       src={product.image || "/images/product-placeholder.jpg"}
                       alt={product.title}
@@ -232,7 +232,7 @@ const Products = () => {
                         (max-width: 1024px) 33vw,
                         25vw
                       "
-                      className="object-cover transition-transform duration-700 ease-out group-hover:scale-[1.04]"
+                      className="product-image object-cover transition-transform duration-700 ease-out group-hover:scale-[1.04]"
                     />
 
                     {/* Subtle Overlay */}
