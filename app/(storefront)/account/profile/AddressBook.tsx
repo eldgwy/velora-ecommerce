@@ -373,7 +373,11 @@ const AddressBook = ({ addresses }: AddressBookProps) => {
                       autoComplete="country-name"
                       disabled={isSubmitting}
                       aria-invalid={fieldState.invalid}
+                      placeholder="US, EG, GBR…"
                     />
+                    <FieldDescription>
+                      2-3 letter country code (ISO 3166-1).
+                    </FieldDescription>
                     {fieldState.invalid && (
                       <FieldError errors={[fieldState.error]} />
                     )}
@@ -439,6 +443,9 @@ const AddressBook = ({ addresses }: AddressBookProps) => {
                       disabled={isSubmitting}
                       aria-invalid={fieldState.invalid}
                     />
+                    <FieldDescription>
+                      Alphanumeric, 3-12 characters (e.g. 10001, SW1A 1AA).
+                    </FieldDescription>
                     {fieldState.invalid && (
                       <FieldError errors={[fieldState.error]} />
                     )}
