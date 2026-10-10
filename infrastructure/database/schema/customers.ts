@@ -45,7 +45,7 @@ export const customerProfiles = pgTable(
       .notNull()
       .defaultNow(),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
       .references(() => user.id, {
         onDelete: "cascade",

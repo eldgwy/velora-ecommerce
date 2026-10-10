@@ -20,7 +20,7 @@ export const reviews = pgTable(
       .defaultRandom()
       .primaryKey(),
 
-    userId: uuid("user_id").references(
+    userId: text("user_id").references(
       () => user.id,
       {
         onDelete: "set null",

@@ -1,10 +1,10 @@
 import { defineConfig } from "drizzle-kit";
-import { env } from "@/config/env";
+import { env } from "./config/env";
 
 export default defineConfig({
-  schema: "@/infrastructure/database/schema/index.ts",
+  schema: "./infrastructure/database/schema/index.ts",
 
-  out: "@/infrastructure/database/drizzle",
+  out: "./infrastructure/database/drizzle",
 
   dialect: "postgresql",
 

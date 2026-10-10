@@ -1,6 +1,7 @@
 import {
   AnyPgColumn,
   boolean,
+  check,
   index,
   integer,
   numeric,
@@ -11,6 +12,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import {
   productStatusEnum,
@@ -28,7 +30,7 @@ export const categories = pgTable("categories", {
 
     logo: text("logo"),
 
-    parentId: uuid("parent_id").references((): AnyPgColumn => categories.id, { onDelete: "cascade",}),
+    parentId: uuid("parent_id").references((): AnyPgColumn => categories.id, { onDelete: "restrict", }),
 
     isActive: boolean("is_active").notNull().default(true),
 
@@ -118,6 +120,10 @@ export const products = pgTable("products", {
       table.brandId,
       table.status,
     ),
+
+    check("products_base_price_positive", sql`${table.basePrice} > 0`),
+
+    check("products_compare_price_valid", sql`${table.comparePrice} IS NULL OR ${table.comparePrice} >= ${table.basePrice}`),
   ],
 );
 
@@ -157,6 +163,11 @@ export const productImages = pgTable("product_images", {
       table.productId,
       table.sortOrder,
     ),
+
+    // Exactly one primary image per product (SRS FR-XX)
+    uniqueIndex("product_images_product_primary_unique").on(
+      table.productId,
+    ).where(sql`is_primary = true`),
   ],
 );
 
@@ -175,8 +186,7 @@ export const productVariants = pgTable(
 
     description: text("description"),
 
-    // Preserve original Prisma mapping: @map("is_acitve")
-    status: productVariantStatusEnum("is_acitve")
+    status: productVariantStatusEnum("is_active")
       .notNull()
       .default("ACTIVE"),
 
@@ -221,6 +231,8 @@ export const productVariants = pgTable(
     uniqueIndex("product_variant_barcode_unique").on(
       table.barcode,
     ),
+
+    check("product_variant_price_override_positive", sql`${table.priceOverride} IS NULL OR ${table.priceOverride} > 0`),
   ],
 );
 

@@ -2,6 +2,7 @@ import {
   integer,
   numeric,
   pgTable,
+  text,
   timestamp,
   uniqueIndex,
   index,
@@ -19,7 +20,7 @@ export const carts = pgTable(
       .defaultRandom()
       .primaryKey(),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
       .references(() => user.id, {
         onDelete: "cascade",

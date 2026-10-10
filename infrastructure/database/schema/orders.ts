@@ -30,7 +30,7 @@ export const orders = pgTable(
 
     orderNumber: text("order_number").notNull(),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
       .references(() => user.id, {
         onDelete: "restrict",

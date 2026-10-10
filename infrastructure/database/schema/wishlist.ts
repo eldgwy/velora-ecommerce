@@ -1,6 +1,7 @@
 import {
   index,
   pgTable,
+  text,
   timestamp,
   uniqueIndex,
   uuid,
@@ -16,7 +17,7 @@ export const wishlists = pgTable(
       .defaultRandom()
       .primaryKey(),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
       .references(() => user.id, {
         onDelete: "cascade",

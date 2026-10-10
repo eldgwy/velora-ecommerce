@@ -23,6 +23,12 @@ const envSchema = z.object({
   SMTP_PASS: z.string().min(1, 'SMTP_PASS is required'),
   // Optional – defaults to "Velora <SMTP_USER>" when omitted.
   SMTP_FROM: z.string().optional(),
+
+  // Cloudinary – signed uploads for product media (server-side only)
+  CLOUDINARY_CLOUD_NAME: z.string().min(1, 'CLOUDINARY_CLOUD_NAME is required'),
+  CLOUDINARY_API_KEY: z.string().min(1, 'CLOUDINARY_API_KEY is required'),
+  CLOUDINARY_API_SECRET: z.string().min(1, 'CLOUDINARY_API_SECRET is required'),
+  CLOUDINARY_UPLOAD_PRESET: z.string().optional(),
 });
 
 const loadEnvFile = (envPath: string) => {

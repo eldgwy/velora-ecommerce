@@ -24,7 +24,7 @@ function isPastDateString(value: string): boolean {
   if (Number.isNaN(parsed.getTime())) return false;
 
   const now = new Date();
-  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
 
   return parsed.getTime() <= todayUtc;
 }

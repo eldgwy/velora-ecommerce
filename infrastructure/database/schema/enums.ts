@@ -18,9 +18,9 @@ export const couponTypeEnum = pgEnum("coupon_type", [
 ]);
 
 export const reviewStatusEnum = pgEnum("review_status", [
-  "PENDING",
-  "APPROVED",
-  "REJECTED",
+  "pending",
+  "approved",
+  "rejected",
 ]);
 
 export const refundStatusEnum = pgEnum("refund_status", [
