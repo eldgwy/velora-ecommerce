@@ -335,8 +335,18 @@ describe("pre-checkout validation", () => {
   });
 
   it("surfaces expired promotions instead of silently dropping them", async () => {
-    await testDb.delete(promotionProducts);
-    await testDb.delete(promotions);
+    // Scoped swap: replace only this suite's promotion mapping (unscoped
+    // deletes would wipe parallel suites' promotions in the shared DB).
+    await testDb.delete(promotionProducts).where(eq(promotionProducts.productId, productId));
+    const myPromos = await testDb
+      .select({ id: promotions.id })
+      .from(promotions)
+      .where(like(promotions.name, `%${SFX}%`));
+    const myPromoIds = myPromos.map((p) => p.id);
+    if (myPromoIds.length > 0) {
+      await testDb.delete(promotionProducts).where(inArray(promotionProducts.promotionId, myPromoIds));
+      await testDb.delete(promotions).where(inArray(promotions.id, myPromoIds));
+    }
     const now = new Date();
     const [promo] = await testDb
       .insert(promotions)
@@ -356,8 +366,8 @@ describe("pre-checkout validation", () => {
       i.warnings.some((w) => w.type === "promotion_expired"),
     );
     expect(flagged.length).toBeGreaterThan(0);
-    await testDb.delete(promotionProducts);
-    await testDb.delete(promotions);
+    await testDb.delete(promotionProducts).where(eq(promotionProducts.promotionId, promo.id));
+    await testDb.delete(promotions).where(eq(promotions.id, promo.id));
   });
 
   it("creates no orders and reserves no stock", async () => {
@@ -365,9 +375,12 @@ describe("pre-checkout validation", () => {
       .select()
       .from(inventory)
       .where(eq(inventory.variantId, vA));
+    // Scoped to this suite's user: parallel suites create their own orders
+    // in the shared test database.
     const ordersBefore = await testDb
       .select({ count: sql<number>`count(*)::int` })
-      .from(orders);
+      .from(orders)
+      .where(eq(orders.userId, userId));
 
     await validateCartForCheckout({ kind: "user", userId });
     await validateCartForCheckout({ kind: "user", userId });
@@ -378,7 +391,8 @@ describe("pre-checkout validation", () => {
       .where(eq(inventory.variantId, vA));
     const ordersAfter = await testDb
       .select({ count: sql<number>`count(*)::int` })
-      .from(orders);
+      .from(orders)
+      .where(eq(orders.userId, userId));
     expect(invAfter!.reservedQuantity).toBe(invBefore!.reservedQuantity);
     expect(ordersAfter[0]!.count).toBe(ordersBefore[0]!.count);
   });

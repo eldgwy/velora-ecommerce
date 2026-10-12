@@ -11,7 +11,7 @@ vi.mock("next/cache", () => ({
 }));
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
-import { and, eq, inArray, lte } from "drizzle-orm";
+import { and, eq, inArray, like, lte } from "drizzle-orm";
 import {
   categories,
   brands,
@@ -68,6 +68,21 @@ let rootId = "",
   orderId = "";
 
 beforeAll(async () => {
+  // Rerun safety: this suite uses fixed synthetic order numbers (`ORD-*`).
+  // With `orders_order_number_unique` enforced, leftovers from an
+  // interrupted run would collide on the next run. Clear only that
+  // synthetic prefix (dependents first; no FK cascades in this environment).
+  const stale = await testDb
+    .select({ id: orders.id })
+    .from(orders)
+    .where(like(orders.orderNumber, "ORD-%"));
+  const staleIds = stale.map((o) => o.id);
+  if (staleIds.length > 0) {
+    await testDb.delete(payments).where(inArray(payments.orderId, staleIds));
+    await testDb.delete(orderItems).where(inArray(orderItems.orderId, staleIds));
+    await testDb.delete(orders).where(inArray(orders.id, staleIds));
+  }
+
   const [root] = await testDb
     .insert(categories)
     .values({ slug: "order-res-root", name: "Order Res Root" })
@@ -253,18 +268,23 @@ describe("reserveOrderInventory", () => {
     expect(inv2?.available).toBe(4);
   });
 
-  it("aggregates duplicate variants within one order before checking availability", async () => {
+  it("reserves multiple variants within one order with per-variant checks", async () => {
+    // NOTE: duplicate (order, variant) lines are rejected by the declared
+    // `order_items_order_variant_unique` constraint, so multi-line
+    // reservation is exercised with distinct variants here. The
+    // reserve/stock-check aggregation in `reserveOrderInventory` still sums
+    // per variant defensively.
     const [order] = await testDb
       .insert(orders)
       .values({
         orderNumber: "ORD-TEST-003",
         userId: "test-user",
         status: "PENDING",
-        subtotal: "24.00",
+        subtotal: "54.00",
         discountAmount: "0.00",
         shippingAmount: "0.00",
         taxAmount: "0.00",
-        totalAmount: "24.00",
+        totalAmount: "54.00",
         currency: "USD",
         paymentStatus: "PENDING",
       })
@@ -283,23 +303,28 @@ describe("reserveOrderInventory", () => {
       },
       {
         orderId: order.id,
-        variantId: variantId1,
+        variantId: variantId2,
         productName: "Order Res Product",
-        variantName: "Variant 1",
-        sku: "ORD-RES-SKU-001",
+        variantName: "Variant 2",
+        sku: "ORD-RES-SKU-002",
         quantity: 3,
-        unitPrice: "12.00",
-        totalAmount: "36.00",
+        unitPrice: "10.00",
+        totalAmount: "30.00",
       },
     ]);
+
+    const before1 = await getInventoryByVariant(variantId1);
+    const before2 = await getInventoryByVariant(variantId2);
 
     const result = await reserveOrderInventory(order.id, { actorId: "test-admin" });
 
     expect(result.reservedItems).toHaveLength(2);
 
     const inv1 = await getInventoryByVariant(variantId1);
-    expect(inv1?.reservedQuantity).toBe(5);
-    expect(inv1?.available).toBe(5);
+    expect(inv1!.reservedQuantity - before1!.reservedQuantity).toBe(2);
+
+    const inv2 = await getInventoryByVariant(variantId2);
+    expect(inv2!.reservedQuantity - before2!.reservedQuantity).toBe(3);
 
     await testDb.delete(orderItems).where(eq(orderItems.orderId, order.id));
     await testDb.delete(orders).where(eq(orders.id, order.id));

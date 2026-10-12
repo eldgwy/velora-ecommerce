@@ -23,6 +23,7 @@ import {
 
 import { user } from "./auth";
 import { productVariants } from "./catalog";
+import { randomUUID } from "crypto";
 
 export const orders = pgTable(
   "orders",
@@ -57,6 +58,18 @@ export const orders = pgTable(
        "payment_status",
      ),
 
+    // FR-08 idempotency: stable client-supplied key per checkout attempt,
+    // unique per user. Retries with the same key return the original order.
+    // The client-side default keeps historical insert paths compiling; the
+    // checkout command always supplies an explicit key.
+    idempotencyKey: text("idempotency_key")
+      .notNull()
+      .$defaultFn(() => randomUUID()),
+
+    // sha256 of the canonical checkout input; reusing a key with different
+    // inputs is rejected (409) instead of returning a mismatched order.
+    checkoutHash: text("checkout_hash"),
+
     checkoutExpiresAt: timestamp("checkout_expires_at", {
       mode: "date",
     }),
@@ -79,6 +92,13 @@ export const orders = pgTable(
     uniqueIndex("orders_order_number_unique").on(
       table.orderNumber,
     ),
+
+    uniqueIndex("orders_user_idempotency_unique").on(
+      table.userId,
+      table.idempotencyKey,
+    ),
+
+    index("orders_idempotency_key_idx").on(table.idempotencyKey),
 
     index("orders_user_id_idx").on(table.userId),
 
