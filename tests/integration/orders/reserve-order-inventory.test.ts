@@ -11,7 +11,7 @@ vi.mock("next/cache", () => ({
 }));
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
-import { and, eq, inArray, like, lte } from "drizzle-orm";
+import { and, eq, inArray, like, lte, or } from "drizzle-orm";
 import {
   categories,
   brands,
@@ -81,6 +81,39 @@ beforeAll(async () => {
     await testDb.delete(payments).where(inArray(payments.orderId, staleIds));
     await testDb.delete(orderItems).where(inArray(orderItems.orderId, staleIds));
     await testDb.delete(orders).where(inArray(orders.id, staleIds));
+  }
+
+  // Same rerun safety for the fixed catalog slugs: an interrupted run can
+  // leave `order-res-*` rows behind, and `categories_slug_unique` (plus the
+  // FK net) now rejects blind re-inserts. Scoped to this suite's prefix.
+  const staleVariants = await testDb
+    .select({ id: productVariants.id })
+    .from(productVariants)
+    .where(like(productVariants.sku, "ORD-RES-%"));
+  const staleVariantIds = staleVariants.map((v) => v.id);
+  if (staleVariantIds.length > 0) {
+    const staleInv = await testDb
+      .select({ id: inventory.id })
+      .from(inventory)
+      .where(inArray(inventory.variantId, staleVariantIds));
+    const staleInvIds = staleInv.map((i) => i.id);
+    if (staleInvIds.length > 0) {
+      await testDb.delete(inventoryMovements).where(inArray(inventoryMovements.inventoryId, staleInvIds));
+      await testDb.delete(inventory).where(inArray(inventory.id, staleInvIds));
+    }
+    await testDb.delete(productVariants).where(inArray(productVariants.id, staleVariantIds));
+  }
+  await testDb.delete(products).where(eq(products.name, "Order Res Product"));
+  await testDb.delete(brands).where(like(brands.slug, "order-res-%"));
+  await testDb.delete(categories).where(eq(categories.slug, "order-res-child"));
+  await testDb.delete(categories).where(eq(categories.slug, "order-res-root"));
+
+  // The suite references a synthetic `test-user` everywhere; the enforced
+  // `orders_user_id_user_id_fk` requires the row to exist.
+  const { user } = await import("@/infrastructure/database/schema/auth");
+  const [existingUser] = await testDb.select({ id: user.id }).from(user).where(eq(user.id, "test-user"));
+  if (!existingUser) {
+    await testDb.insert(user).values({ id: "test-user", name: "Test User", email: "test-user@example.com" });
   }
 
   const [root] = await testDb
@@ -195,8 +228,19 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await testDb.delete(orderItems).where(eq(orderItems.orderId, orderId));
-  await testDb.delete(orders).where(eq(orders.id, orderId));
+  // FK-safe teardown order: payments restrict their orders, and order items
+  // restrict their variants. Clear every synthetic order in this suite
+  // (tracked + ORD-% leftovers from nested describes) before parents.
+  const suiteOrders = await testDb
+    .select({ id: orders.id })
+    .from(orders)
+    .where(or(eq(orders.id, orderId), like(orders.orderNumber, "ORD-%")));
+  const suiteOrderIds = suiteOrders.map((o) => o.id);
+  if (suiteOrderIds.length > 0) {
+    await testDb.delete(payments).where(inArray(payments.orderId, suiteOrderIds));
+    await testDb.delete(orderItems).where(inArray(orderItems.orderId, suiteOrderIds));
+    await testDb.delete(orders).where(inArray(orders.id, suiteOrderIds));
+  }
   await testDb.delete(inventoryMovements).where(eq(inventoryMovements.inventoryId, inventoryId1));
   await testDb.delete(inventoryMovements).where(eq(inventoryMovements.inventoryId, inventoryId2));
   await testDb.delete(inventory).where(eq(inventory.id, inventoryId1));
@@ -1433,44 +1477,25 @@ describe("expired reservation worker", () => {
   let expInventoryId2: string;
 
   beforeAll(async () => {
-    // Clean up any leftover expired orders from previous test runs
+    // Clean up any leftover expired orders from previous test runs.
+    // FK-safe order: payments restrict their orders, items restrict variants.
+    const expiredScope = and(
+      eq(orders.status, "PENDING"),
+      eq(orders.paymentStatus, "PENDING"),
+      lte(orders.checkoutExpiresAt, new Date()),
+    );
+    const leftoverIds = testDb.select({ id: orders.id }).from(orders).where(expiredScope);
+    await testDb.delete(payments).where(inArray(payments.orderId, leftoverIds));
     await testDb.delete(orderItems).where(
       inArray(
         orderItems.orderId,
         testDb
           .select({ id: orders.id })
           .from(orders)
-          .where(
-            and(
-              eq(orders.status, "PENDING"),
-              eq(orders.paymentStatus, "PENDING"),
-              lte(orders.checkoutExpiresAt, new Date()),
-            ),
-          ),
+          .where(expiredScope),
       ),
     );
-    await testDb.delete(orders).where(
-      and(
-        eq(orders.status, "PENDING"),
-        eq(orders.paymentStatus, "PENDING"),
-        lte(orders.checkoutExpiresAt, new Date()),
-      ),
-    );
-    await testDb.delete(payments).where(
-      inArray(
-        payments.orderId,
-        testDb
-          .select({ id: orders.id })
-          .from(orders)
-          .where(
-            and(
-              eq(orders.status, "PENDING"),
-              eq(orders.paymentStatus, "PENDING"),
-              lte(orders.checkoutExpiresAt, new Date()),
-            ),
-          ),
-      ),
-    );
+    await testDb.delete(orders).where(expiredScope);
 
     // Create dedicated variants for expired reservation tests
     const [product] = await testDb
@@ -1636,12 +1661,13 @@ describe("expired reservation worker", () => {
   });
 
   afterAll(async () => {
+    // FK-safe order: payments restrict their orders.
+    await testDb.delete(payments).where(eq(payments.id, expiredPaymentId));
     await testDb.delete(orderItems).where(eq(orderItems.orderId, expiredOrderId));
     await testDb.delete(orders).where(eq(orders.id, expiredOrderId));
-    await testDb.delete(payments).where(eq(payments.id, expiredPaymentId));
+    await testDb.delete(payments).where(eq(payments.id, validPaymentId));
     await testDb.delete(orderItems).where(eq(orderItems.orderId, validOrderId));
     await testDb.delete(orders).where(eq(orders.id, validOrderId));
-    await testDb.delete(payments).where(eq(payments.id, validPaymentId));
     await testDb.delete(inventory).where(eq(inventory.id, expInventoryId1));
     await testDb.delete(inventory).where(eq(inventory.id, expInventoryId2));
     await testDb.delete(productVariants).where(eq(productVariants.id, expVariantId1));
@@ -1853,10 +1879,10 @@ describe("expired reservation worker", () => {
       expect(item.reservationStatus).toBe("RELEASED");
     }
 
-    // Cleanup
+    // Cleanup (FK-safe: payments before orders)
+    await testDb.delete(payments).where(eq(payments.id, batchPayment.id));
     await testDb.delete(orderItems).where(eq(orderItems.orderId, batchOrder.id));
     await testDb.delete(orders).where(eq(orders.id, batchOrder.id));
-    await testDb.delete(payments).where(eq(payments.id, batchPayment.id));
   });
 
   it("respects batch size limit", async () => {
@@ -1921,11 +1947,11 @@ describe("expired reservation worker", () => {
 
     expect(result.processed).toBe(2); // Limited by batchSize
 
-    // Cleanup
+    // Cleanup (FK-safe: payments before orders)
     for (const { order, payment } of manyOrders) {
+      await testDb.delete(payments).where(eq(payments.id, payment.id));
       await testDb.delete(orderItems).where(eq(orderItems.orderId, order.id));
       await testDb.delete(orders).where(eq(orders.id, order.id));
-      await testDb.delete(payments).where(eq(payments.id, payment.id));
     }
   });
 
@@ -1978,10 +2004,10 @@ describe("expired reservation worker", () => {
     const expiredIds = expired.map((o) => o.id);
     expect(expiredIds).not.toContain(releasedOrder.id);
 
-    // Cleanup
+    // Cleanup (FK-safe: payments before orders)
+    await testDb.delete(payments).where(eq(payments.id, releasedPayment.id));
     await testDb.delete(orderItems).where(eq(orderItems.orderId, releasedOrder.id));
     await testDb.delete(orders).where(eq(orders.id, releasedOrder.id));
-    await testDb.delete(payments).where(eq(payments.id, releasedPayment.id));
   });
 
   it("handles already fulfilled (COMMITTED) reservations gracefully", async () => {
@@ -2033,10 +2059,10 @@ describe("expired reservation worker", () => {
     const expiredIds = expired.map((o) => o.id);
     expect(expiredIds).not.toContain(committedOrder.id);
 
-    // Cleanup
+    // Cleanup (FK-safe: payments before orders)
+    await testDb.delete(payments).where(eq(payments.id, committedPayment.id));
     await testDb.delete(orderItems).where(eq(orderItems.orderId, committedOrder.id));
     await testDb.delete(orders).where(eq(orders.id, committedOrder.id));
-    await testDb.delete(payments).where(eq(payments.id, committedPayment.id));
   });
 
   it("retries failed orders with exponential backoff", async () => {
@@ -2111,10 +2137,10 @@ describe("expired reservation worker", () => {
     // Should have processed some orders (the fail order will fail)
     expect(result.processed).toBeGreaterThan(0);
 
-    // Cleanup
+    // Cleanup (FK-safe: payments before orders)
+    await testDb.delete(payments).where(eq(payments.id, failPayment.id));
     await testDb.delete(orderItems).where(eq(orderItems.orderId, failOrder.id));
     await testDb.delete(orders).where(eq(orders.id, failOrder.id));
-    await testDb.delete(payments).where(eq(payments.id, failPayment.id));
     await testDb.delete(productVariants).where(eq(productVariants.id, fakeVariant.id));
   });
 });

@@ -13,6 +13,12 @@ import { and, eq } from "drizzle-orm";
 import { sendMail } from "@/shared/lib/mail";
 
 import { testDb } from "../_db";
+import {
+  categories,
+  brands,
+  products,
+  productVariants,
+} from "../_db";
 import { orderItems, orderNotifications, orders } from "@/infrastructure/database/schema/orders";
 import { user } from "@/infrastructure/database/schema/auth";
 import { dispatchOrderNotification } from "@/modules/notifications/application/order-emails";
@@ -20,6 +26,10 @@ import { dispatchOrderNotification } from "@/modules/notifications/application/o
 const SFX = `nt-${Date.now()}`;
 let userId = "";
 let orderId = "";
+let categoryId = "";
+let brandId = "";
+let productId = "";
+let variantId = "";
 
 beforeAll(async () => {
   const [u] = await testDb
@@ -43,9 +53,24 @@ beforeAll(async () => {
     })
     .returning();
   orderId = order.id;
+  // FK-guarded tables need a real variant (integrity net working as intended).
+  const [cat] = await testDb.insert(categories).values({ slug: `nt-cat-${SFX}`, name: "NT Cat" }).returning();
+  const [br] = await testDb.insert(brands).values({ slug: `nt-brand-${SFX}`, name: "NT Brand" }).returning();
+  categoryId = cat.id;
+  brandId = br.id;
+  const [prod] = await testDb
+    .insert(products)
+    .values({ name: "NT Product", status: "ACTIVE", basePrice: "10.00", categoryId, brandId })
+    .returning();
+  productId = prod.id;
+  const [v] = await testDb
+    .insert(productVariants)
+    .values({ productId, sku: `NT-SKU-${SFX}`, status: "ACTIVE" })
+    .returning();
+  variantId = v.id;
   await testDb.insert(orderItems).values({
     orderId,
-    variantId: "00000000-0000-0000-0000-000000000000",
+    variantId,
     productName: "Widget",
     sku: "W-1",
     quantity: 1,
@@ -59,6 +84,10 @@ afterAll(async () => {
   await testDb.delete(orderItems).where(eq(orderItems.orderId, orderId));
   await testDb.delete(orders).where(eq(orders.id, orderId));
   await testDb.delete(user).where(eq(user.id, userId));
+  await testDb.delete(productVariants).where(eq(productVariants.id, variantId));
+  await testDb.delete(products).where(eq(products.id, productId));
+  await testDb.delete(brands).where(eq(brands.id, brandId));
+  await testDb.delete(categories).where(eq(categories.id, categoryId));
 });
 
 describe("order notification dispatch", () => {

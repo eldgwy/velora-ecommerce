@@ -68,8 +68,10 @@ dispatcher; no payment secrets or excess PII in metadata.
 
 ## Known gaps and follow-up work
 
-- No verified refund workflow: paid cancellations need support review; an
-  admin refund action against Stripe + `refunds` rows is the explicit next step.
+- Refund workflow: IMPLEMENTED (admin-only `requestRefund`, partials with
+  BR-007 cap, webhook reconciliation, `refund_issued` notices; see
+  `docs/reliability.md`). Remaining: live Stripe keys, a return-merchandise
+  flow (refunds never restock), partial-capture handling.
 - No carrier/tracking integration for shipment; no delivery-proof capture.
 - No `QUEUED`-notification retry sweep (failed sends wait for the next
   triggering redelivery).

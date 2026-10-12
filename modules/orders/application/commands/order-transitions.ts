@@ -69,10 +69,20 @@ export async function claimNotification(
   return rows.length > 0;
 }
 
-export async function markNotificationSent(orderId: string, type: string): Promise<void> {
+export async function markNotificationSent(
+  orderId: string,
+  type: string,
+  providerMessageId?: string,
+): Promise<void> {
   await db
     .update(orderNotifications)
-    .set({ status: "SENT", sentAt: new Date(), updatedAt: new Date() })
+    .set({
+      status: "SENT",
+      sentAt: new Date(),
+      providerMessageId: providerMessageId ?? null,
+      lastError: null,
+      updatedAt: new Date(),
+    })
     .where(
       and(
         eq(orderNotifications.orderId, orderId),

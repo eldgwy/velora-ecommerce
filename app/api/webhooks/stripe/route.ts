@@ -154,16 +154,41 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
         break;
 
       case "charge.refunded":
-      case "charge.refund.updated":
-        // Handle refunds if needed
-        logger.info("Refund event received", {
-          module: "webhooks",
-          action: "stripeRefund",
-          eventId,
-          orderId,
-        });
+      case "charge.refund.updated": {
+        // Best-effort reconciliation against local refund records. Never
+        // trusts the redirect/event alone: converges stored COMPLETED totals
+        // toward the provider-reported amount_refunded, idempotently.
+        const chargeIntent =
+          typeof object.payment_intent === "string" ? object.payment_intent : paymentIntentId;
+        const amountRefunded =
+          typeof object.amount_refunded === "number" ? object.amount_refunded : null;
+        if (chargeIntent && amountRefunded !== null) {
+          const { reconcileRefundEvent } = await import(
+            "@/modules/payments/application/commands/request-refund"
+          );
+          const outcome = await reconcileRefundEvent({
+            paymentIntentId: chargeIntent,
+            chargeId: typeof object.id === "string" ? object.id : eventId,
+            amountRefundedCents: amountRefunded,
+          });
+          logger.info("Refund event reconciled", {
+            module: "webhooks",
+            action: "stripeRefundReconciled",
+            eventId,
+            orderId,
+            ...outcome,
+          });
+        } else {
+          logger.info("Refund event received", {
+            module: "webhooks",
+            action: "stripeRefund",
+            eventId,
+            orderId,
+          });
+        }
         result = { success: true };
         break;
+      }
 
       default:
         logger.info("Unhandled Stripe event type", {

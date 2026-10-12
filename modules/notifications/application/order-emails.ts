@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
-import { orderItems, orders } from "@/infrastructure/database/schema/orders";
+import { orderItems, orderNotifications, orders } from "@/infrastructure/database/schema/orders";
 import { user } from "@/infrastructure/database/schema/auth";
 import { sendMail } from "@/shared/lib/mail";
 import { logger } from "@/shared/lib/logging/logger";
@@ -9,6 +9,7 @@ import {
   claimNotification,
   markNotificationSent,
 } from "@/modules/orders/application/commands/order-transitions";
+import { computeBackoffMs, sanitizeProviderError } from "@/modules/notifications/application/backoff";
 
 export type OrderNotificationType =
   | "order_placed"
@@ -17,7 +18,8 @@ export type OrderNotificationType =
   | "order_cancelled"
   | "reservation_expired"
   | "order_shipped"
-  | "order_delivered";
+  | "order_delivered"
+  | "refund_issued";
 
 const SUBJECTS: Record<OrderNotificationType, string> = {
   order_placed: "Your VELORA order is confirmed",
@@ -27,6 +29,7 @@ const SUBJECTS: Record<OrderNotificationType, string> = {
   reservation_expired: "Your VELORA reservation expired",
   order_shipped: "Your VELORA order has shipped",
   order_delivered: "Your VELORA order was delivered",
+  refund_issued: "A refund was issued for your VELORA order",
 };
 
 /**
@@ -44,40 +47,23 @@ export async function dispatchOrderNotification(
   const won = await claimNotification(orderId, type);
   if (!won) return { sent: false, reason: "already-handled" };
 
-  const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
-  if (!order) return { sent: false, reason: "order-missing" };
-  const [owner] = await db
-    .select({ email: user.email, name: user.name })
-    .from(user)
-    .where(eq(user.id, order.userId));
-  if (!owner) return { sent: false, reason: "owner-missing" };
+  const context = await loadNotificationContext(orderId);
+  if (!context) return { sent: false, reason: "context-missing" };
 
-  const lines = await db
-    .select({
-      productName: orderItems.productName,
-      quantity: orderItems.quantity,
-      totalAmount: orderItems.totalAmount,
-    })
-    .from(orderItems)
-    .where(eq(orderItems.orderId, orderId));
-
-  const subject = `${SUBJECTS[type]} — ${order.orderNumber}`;
-  const { html, text } = renderOrderEmail(type, {
-    name: owner.name,
-    orderNumber: order.orderNumber,
-    total: `${order.totalAmount} ${order.currency}`,
-    lines: lines.map((l) => ({
-      name: l.productName ?? "Item",
-      quantity: l.quantity,
-      total: l.totalAmount ?? "",
-    })),
-  });
+  const subject = `${SUBJECTS[type]} — ${context.orderNumber}`;
+  const { html, text } = renderOrderEmail(type, context);
 
   try {
-    await sendMail({ to: owner.email, subject, html, text });
+    const info = await sendMail({ to: context.toEmail, subject, html, text });
+    await markNotificationSent(
+      orderId,
+      type,
+      (info as { messageId?: string } | undefined)?.messageId,
+    );
   } catch (error) {
-    // State transition already committed; leave QUEUED so a later sweep can
-    // retry. Never fail the caller (webhook/action) over email.
+    // State transition already committed; schedule a bounded retry instead
+    // of failing the caller. Never fail the caller (webhook/action) over email.
+    await recordDeliveryFailure(orderId, type, error);
     logger.error("Order notification send failed", {
       module: "notifications",
       action: "orderEmailFailed",
@@ -88,14 +74,91 @@ export async function dispatchOrderNotification(
     return { sent: false, reason: "provider-error" };
   }
 
-  await markNotificationSent(orderId, type);
   return { sent: true };
 }
 
-function renderOrderEmail(
+export interface NotificationContext {
+  toEmail: string;
+  toName: string;
+  orderNumber: string;
+  total: string;
+  lines: Array<{ name: string; quantity: number; total: string }>;
+}
+
+/** Load recipient + snapshot content. No secrets leave with this object. */
+export async function loadNotificationContext(
+  orderId: string,
+): Promise<NotificationContext | null> {
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId));
+  if (!order) return null;
+  const [owner] = await db
+    .select({ email: user.email, name: user.name })
+    .from(user)
+    .where(eq(user.id, order.userId));
+  if (!owner) return null;
+
+  const lines = await db
+    .select({
+      productName: orderItems.productName,
+      quantity: orderItems.quantity,
+      totalAmount: orderItems.totalAmount,
+    })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId));
+
+  return {
+    toEmail: owner.email,
+    toName: owner.name,
+    orderNumber: order.orderNumber,
+    total: `${order.totalAmount} ${order.currency}`,
+    lines: lines.map((l) => ({
+      name: l.productName ?? "Item",
+      quantity: l.quantity,
+      total: l.totalAmount ?? "",
+    })),
+  };
+}
+
+/**
+ * Record a failed attempt: bump attempts, schedule backoff, keep a safe
+ * error prefix. The retry worker picks the row up when due.
+ */
+export async function recordDeliveryFailure(
+  orderId: string,
+  type: string,
+  error: unknown,
+): Promise<void> {
+  const [row] = await db
+    .select({ attempts: orderNotifications.attempts })
+    .from(orderNotifications)
+    .where(
+      and(
+        eq(orderNotifications.orderId, orderId),
+        eq(orderNotifications.type, type),
+      ),
+    );
+  const attempts = (row?.attempts ?? 0) + 1;
+  await db
+    .update(orderNotifications)
+    .set({
+      status: "QUEUED",
+      attempts,
+      nextRetryAt: new Date(Date.now() + computeBackoffMs(attempts)),
+      lastError: sanitizeProviderError(error),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(orderNotifications.orderId, orderId),
+        eq(orderNotifications.type, type),
+      ),
+    );
+}
+
+export function renderOrderEmail(
   type: OrderNotificationType,
   data: {
-    name: string;
+    toName: string;
     orderNumber: string;
     total: string;
     lines: Array<{ name: string; quantity: number; total: string }>;
@@ -109,14 +172,15 @@ function renderOrderEmail(
     reservation_expired: `Your checkout reservation expired before payment completed, so held stock was released. Start a new checkout when ready.`,
     order_shipped: `Good news — your order is on its way.`,
     order_delivered: `Your order was delivered. Enjoy, and consider leaving a review.`,
+    refund_issued: `A refund was issued to your original payment method. It can take 5–10 business days to appear. Returned goods re-enter stock only after a verified return — never automatically.`,
   };
   const itemsHtml = data.lines
     .map((l) => `<li>${escapeHtml(l.name)} × ${l.quantity} — ${escapeHtml(l.total)}</li>`)
     .join("");
   const itemsText = data.lines.map((l) => `- ${l.name} × ${l.quantity} — ${l.total}`).join("\n");
   return {
-    html: `<div><p>Hi ${escapeHtml(data.name)},</p><p>${bodies[type]}</p><p><strong>Order ${escapeHtml(data.orderNumber)} · ${escapeHtml(data.total)}</strong></p><ul>${itemsHtml}</ul><p>— VELORA</p></div>`,
-    text: `Hi ${data.name},\n\n${bodies[type]}\n\nOrder ${data.orderNumber} · ${data.total}\n${itemsText}\n\n— VELORA`,
+    html: `<div><p>Hi ${escapeHtml(data.toName)},</p><p>${bodies[type]}</p><p><strong>Order ${escapeHtml(data.orderNumber)} · ${escapeHtml(data.total)}</strong></p><ul>${itemsHtml}</ul><p>— VELORA</p></div>`,
+    text: `Hi ${data.toName},\n\n${bodies[type]}\n\nOrder ${data.orderNumber} · ${data.total}\n${itemsText}\n\n— VELORA`,
   };
 }
 

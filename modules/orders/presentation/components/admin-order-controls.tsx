@@ -13,6 +13,7 @@ import {
   deliverOrderAction,
   shipOrderAction,
 } from "@/modules/orders/presentation/actions/admin-order.actions";
+import { AdminRefundControl } from "@/modules/orders/presentation/components/admin-refund-control";
 
 /**
  * Staff fulfillment controls. Every control maps to one audited server
@@ -115,6 +116,9 @@ export function AdminOrderControls({
       ) : null}
       {status !== "PENDING" && status !== "PROCESSING" && status !== "SHIPPED" ? (
         <p className="text-xs text-muted-foreground">No further transitions available.</p>
+      ) : null}
+      {paymentStatus === "PAID" || paymentStatus === "PARTIALLY_REFUNDED" ? (
+        <AdminRefundControl orderId={orderId} />
       ) : null}
     </div>
   );

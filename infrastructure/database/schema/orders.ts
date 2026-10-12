@@ -320,6 +320,18 @@ export const orderNotifications = pgTable(
 
     status: text("status").notNull().default("QUEUED"),
 
+    // Durable delivery (migration 0019): bounded retries with crash recovery.
+    // QUEUED -> SENDING (leased claim) -> SENT | QUEUED (retry) | FAILED.
+    attempts: integer("attempts").notNull().default(0),
+
+    nextRetryAt: timestamp("next_retry_at", {
+      mode: "date",
+    }),
+
+    lastError: text("last_error"),
+
+    providerMessageId: text("provider_message_id"),
+
     createdAt: timestamp("created_at", {
       mode: "date",
     })

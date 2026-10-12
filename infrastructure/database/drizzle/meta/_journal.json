@@ -127,6 +127,20 @@
       "when": 1791900000004,
       "tag": "0017_order_audit_and_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791900000005,
+      "tag": "0018_reconcile_missing_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791900000006,
+      "tag": "0019_notification_retry_state",
+      "breakpoints": true
     }
   ]
 }
