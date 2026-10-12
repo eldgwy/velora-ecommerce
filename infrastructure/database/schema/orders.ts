@@ -1,6 +1,8 @@
 import {
+  check,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -12,6 +14,7 @@ import {
 import {
   orderAddressTypeEnum,
   orderPaymentStatusEnum,
+  orderReservationStatusEnum,
   orderStatusEnum,
   paymentMethodEnum,
   paymentStatusEnum,
@@ -51,8 +54,12 @@ export const orders = pgTable(
     currency: text("currency").notNull(),
 
     paymentStatus: orderPaymentStatusEnum(
-      "payment_status",
-    ),
+       "payment_status",
+     ),
+
+    checkoutExpiresAt: timestamp("checkout_expires_at", {
+      mode: "date",
+    }),
 
     notes: text("notes"),
 
@@ -130,6 +137,10 @@ export const orderItems = pgTable(
 
     totalAmount: numeric("total_amount"),
 
+    reservationStatus: orderReservationStatusEnum("reservation_status")
+      .notNull()
+      .default("PENDING"),
+
     createdAt: timestamp("created_at", {
       mode: "date",
     })
@@ -157,6 +168,10 @@ export const orderItems = pgTable(
     ),
 
     index("order_items_sku_idx").on(table.sku),
+
+    index("order_items_reservation_status_idx").on(
+      table.reservationStatus,
+    ),
   ],
 );
 
@@ -373,5 +388,66 @@ export const refunds = pgTable(
     index("refunds_created_at_idx").on(
       table.createdAt,
     ),
+  ],
+);
+
+export const webhookEvents = pgTable(
+  "webhook_events",
+  {
+    id: uuid("id")
+      .defaultRandom()
+      .primaryKey(),
+
+    provider: text("provider").notNull(),
+
+    providerEventId: text("provider_event_id").notNull(),
+
+    eventType: text("event_type").notNull(),
+
+    orderId: uuid("order_id").references(() => orders.id, {
+      onDelete: "set null",
+    }),
+
+    paymentId: uuid("payment_id").references(() => payments.id, {
+      onDelete: "set null",
+    }),
+
+    status: text("status").notNull().default("PENDING"),
+
+    errorMessage: text("error_message"),
+
+    attempts: integer("attempts").notNull().default(0),
+
+    completedAt: timestamp("completed_at", {
+      mode: "date",
+    }),
+
+    payload: jsonb("payload").notNull(),
+
+    createdAt: timestamp("created_at", {
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+
+    updatedAt: timestamp("updated_at", {
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("webhook_events_provider_event_id_unique").on(
+      table.provider,
+      table.providerEventId,
+    ),
+
+    index("webhook_events_order_id_idx").on(table.orderId),
+
+    index("webhook_events_payment_id_idx").on(table.paymentId),
+
+    index("webhook_events_status_idx").on(table.status),
+
+    index("webhook_events_provider_idx").on(table.provider),
   ],
 );

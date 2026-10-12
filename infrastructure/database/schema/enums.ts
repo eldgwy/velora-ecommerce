@@ -32,6 +32,7 @@ export const refundStatusEnum = pgEnum("refund_status", [
 
 export const paymentStatusEnum = pgEnum("payment_status", [
   "PENDING",
+  "AUTHORIZED",
   "COMPLETED",
   "FAILED",
   "REFUNDED",
@@ -114,4 +115,18 @@ export const userRoleEnum = pgEnum("user_role", [
 export const userStatusEnum = pgEnum("user_status", [
   "ACTIVE",
   "NOTACTIVE",
+]);
+
+export const orderReservationStatusEnum = pgEnum("order_reservation_status", [
+  "PENDING",
+  "RESERVED",
+  "RELEASED",
+  "COMMITTED",
+]);
+
+export const lowStockAlertStatusEnum = pgEnum("low_stock_alert_status", [
+  "PENDING",
+  "PROCESSING",
+  "DELIVERED",
+  "FAILED",
 ]);

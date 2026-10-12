@@ -10,6 +10,8 @@ export * from "./catalog";
 
 export * from "./inventory";
 
+export * from "./low-stock-alerts";
+
 export * from "./cart";
 
 export * from "./wishlist";

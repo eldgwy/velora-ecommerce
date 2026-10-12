@@ -5,6 +5,7 @@ import { inventory, inventoryMovements } from "@/infrastructure/database/schema/
 import { productVariants } from "@/infrastructure/database/schema/catalog";
 import { inventoryMovementTypeEnum } from "@/infrastructure/database/schema/enums";
 import { logger } from "@/shared/lib/logging/logger";
+import { checkAndCreateLowStockAlert, checkAndResolveLowStockAlert } from "@/modules/inventory/application/low-stock-alerts";
 
 export type InventoryMovementType = (typeof inventoryMovementTypeEnum.enumValues)[number];
 
@@ -199,6 +200,10 @@ export async function adjustStock(
       notes: options.notes,
     });
 
+    // Check and create/resolve low-stock alert after stock adjustment
+    await checkAndCreateLowStockAlert(tx, variantId, { actorId, requestId });
+    await checkAndResolveLowStockAlert(tx, variantId, { actorId, requestId });
+
     logger.catalog.inventoryAdjusted(updated.id, variantId, type, delta, actorId ?? "unknown", requestId);
 
     return toPersisted(
@@ -255,6 +260,10 @@ export async function setStock(
       reason: options.reason,
       notes: options.notes,
     });
+
+    // Check and create/resolve low-stock alert after stock adjustment
+    await checkAndCreateLowStockAlert(tx, variantId, { actorId, requestId });
+    await checkAndResolveLowStockAlert(tx, variantId, { actorId, requestId });
 
     logger.catalog.inventoryAdjusted(updated.id, variantId, "ADJUSTMENT", delta, actorId ?? "unknown", requestId);
 
@@ -318,6 +327,11 @@ export async function adjustReservation(
       reason: options.reason,
       notes: options.notes,
     });
+
+    // Check and create/resolve low-stock alert after reservation adjustment
+    // (since available = quantity - reservedQuantity)
+    await checkAndCreateLowStockAlert(tx, variantId, { actorId, requestId });
+    await checkAndResolveLowStockAlert(tx, variantId, { actorId, requestId });
 
     logger.catalog.inventoryAdjusted(updated.id, variantId, type, delta, actorId ?? "unknown", requestId);
 

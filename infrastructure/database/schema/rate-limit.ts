@@ -1,15 +1,20 @@
-import { pgTable, text, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, bigint, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Rate limit table for Better Auth.
  * Stores rate limit keys (IP, user ID, etc.) with request counts and timestamps.
+ * Includes an `id` column as primary key to match Better Auth's generated schema.
  */
 export const rateLimit = pgTable(
   "rate_limit",
   {
-    key: text("key").primaryKey(),
+    id: text("id").primaryKey(),
+    key: text("key").notNull().unique(),
     count: integer("count").default(1).notNull(),
-    lastRequest: integer("last_request").notNull(),
+    lastRequest: bigint("last_request", { mode: "number" }).notNull(),
   },
-  (table) => [index("rate_limit_last_request_idx").on(table.lastRequest)],
+  (table) => [
+    index("rate_limit_last_request_idx").on(table.lastRequest),
+    uniqueIndex("rate_limit_key_unique").on(table.key),
+  ],
 );

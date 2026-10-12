@@ -11,6 +11,11 @@ const envSchema = z.object({
   BETTER_AUTH_API_KEY: z.string(),
   BETTER_AUTH_URL: z.url(),
 
+  // Stripe - payment processing
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+
   // SMTP (Nodemailer) – powers transactional emails (email verification, …)
   SMTP_HOST: z.string().min(1, 'SMTP_HOST is required'),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
@@ -29,6 +34,17 @@ const envSchema = z.object({
   CLOUDINARY_API_KEY: z.string().min(1, 'CLOUDINARY_API_KEY is required'),
   CLOUDINARY_API_SECRET: z.string().min(1, 'CLOUDINARY_API_SECRET is required'),
   CLOUDINARY_UPLOAD_PRESET: z.string().optional(),
+
+  // Internal job scheduling
+  CRON_SECRET: z.string().optional(),
+  
+  // Reservation expiration configuration
+  RESERVATION_EXPIRY_MINUTES: z.coerce.number().int().positive().default(30),
+  EXPIRED_RESERVATION_BATCH_SIZE: z.coerce.number().int().positive().default(100),
+  EXPIRED_RESERVATION_MAX_RETRIES: z.coerce.number().int().nonnegative().default(3),
+
+  // Low-stock alert configuration
+  LOW_STOCK_ALERT_RECIPIENTS: z.string().optional(),
 });
 
 const loadEnvFile = (envPath: string) => {

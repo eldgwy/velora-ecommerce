@@ -24,6 +24,7 @@ export {
   variantOptionValues,
 } from "@/infrastructure/database/schema/catalog";
 export { inventory, inventoryMovements } from "@/infrastructure/database/schema/inventory";
+export { orders, orderItems, orderStatusHistories, webhookEvents, payments, refunds } from "@/infrastructure/database/schema/orders";
 export { reviews, reviewImages } from "@/infrastructure/database/schema/reviews";
 export {
   reviewStatusEnum,

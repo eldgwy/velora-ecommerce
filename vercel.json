@@ -1,0 +1,14 @@
+{
+  "crons": [
+    {
+      "path": "/api/internal/jobs/expire-reservations",
+      "schedule": "*/5 * * * *",
+      "method": "POST"
+    },
+    {
+      "path": "/api/internal/jobs/deliver-low-stock-alerts",
+      "schedule": "*/10 * * * *",
+      "method": "POST"
+    }
+  ]
+}

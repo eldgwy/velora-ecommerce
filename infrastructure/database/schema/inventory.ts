@@ -1,4 +1,5 @@
 import {
+  check,
   index,
   integer,
   pgTable,
@@ -7,6 +8,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import { inventoryMovementTypeEnum } from "./enums";
 import { productVariants } from "./catalog";
@@ -55,11 +57,17 @@ export const inventory = pgTable(
       table.quantity,
     ),
 
-    index("inventory_quantity_threshold_idx").on(
-      table.quantity,
-      table.lowStockThreshold,
-    ),
-  ],
+     index("inventory_quantity_threshold_idx").on(
+       table.quantity,
+       table.lowStockThreshold,
+     ),
+
+     // FR-05 Phase 2: defense-in-depth availability invariants (mirror the
+     // app-level FOR UPDATE enforcement). Kept in-sync with migration 0007.
+     check("inventory_quantity_non_negative", sql`"quantity" >= 0`),
+     check("inventory_reserved_non_negative", sql`"reserved_quantity" >= 0`),
+     check("inventory_reserved_le_quantity", sql`"reserved_quantity" <= "quantity"`),
+   ],
 );
 
 export const inventoryMovements = pgTable(
