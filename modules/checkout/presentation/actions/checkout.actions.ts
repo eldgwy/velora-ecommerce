@@ -10,6 +10,7 @@ import {
   verifyGuestCartCookie,
 } from "@/modules/cart/domain/guest-cookie";
 import { mergeGuestCartIntoUserCart } from "@/modules/cart/application/commands/merge-guest-cart";
+import { dispatchOrderNotification } from "@/modules/notifications/application/order-emails";
 import {
   placeOrder,
   type CheckoutResult,
@@ -143,6 +144,16 @@ export async function placeOrderAction(
         notes: parsedInput.data.notes,
       },
       parsedKey.data,
+    );
+    // Post-commit confirmation notice (claim-guarded; replays and retries
+    // never resend). Fire-and-forget: email failure never fails checkout.
+    void dispatchOrderNotification(result.orderId, "order_placed").catch((error: unknown) =>
+      logger.error("Placed notification dispatch failed", {
+        module: "checkout",
+        action: "placeOrder",
+        orderId: result.orderId,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      }),
     );
     return { ok: true, data: result };
   } catch (error) {

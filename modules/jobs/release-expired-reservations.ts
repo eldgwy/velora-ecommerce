@@ -86,6 +86,22 @@ export async function processExpiredOrder(
       reason: "Checkout expired",
     });
 
+    // Post-commit customer notice (claim-guarded; retries never resend).
+    try {
+      const { dispatchOrderNotification } = await import(
+        "@/modules/notifications/application/order-emails"
+      );
+      await dispatchOrderNotification(orderId, "reservation_expired");
+    } catch (notifyError) {
+      logger.error("Expiry notification dispatch failed", {
+        module: "jobs",
+        action: "processExpiredOrder",
+        orderId,
+        requestId,
+      });
+      void notifyError;
+    }
+
     logger.info("Expired order processed successfully", {
       module: "jobs",
       action: "processExpiredOrder",

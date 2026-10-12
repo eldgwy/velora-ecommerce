@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
 import { inventory, inventoryMovements } from "@/infrastructure/database/schema/inventory";
-import { orderItems, orders, payments, webhookEvents } from "@/infrastructure/database/schema/orders";
+import { orderItems, orders, orderStatusHistories, payments, webhookEvents } from "@/infrastructure/database/schema/orders";
 import { orderPaymentStatusEnum, orderReservationStatusEnum, orderStatusEnum, paymentStatusEnum } from "@/infrastructure/database/schema/enums";
 import { logger } from "@/shared/lib/logging/logger";
 import {
@@ -314,6 +314,18 @@ export async function finalizeOrderPayment(
       })
       .where(eq(orders.id, orderId));
 
+    // 11b. Audit the fulfillment transition (previously unrecorded).
+    await tx.insert(orderStatusHistories).values({
+      orderId,
+      status: newOrderStatus,
+      previousStatus: order.status,
+      eventType: "payment_succeeded",
+      actorType: "webhook",
+      actorId: options.actorId ?? "webhook",
+      correlationId: options.requestId ?? null,
+      note: "Payment confirmed",
+    });
+
     // 12. Update payment record
     await tx
       .update(payments)
@@ -501,6 +513,17 @@ export async function handlePaymentFailureWebhook(
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
+
+    await tx.insert(orderStatusHistories).values({
+      orderId,
+      status: newOrderStatus,
+      previousStatus: order.status,
+      eventType: "payment_failed",
+      actorType: "webhook",
+      actorId: options.actorId ?? "webhook",
+      correlationId: options.requestId ?? null,
+      note: options.reason ?? "Payment failed",
+    });
 
     // Record webhook event
     await tx.insert(webhookEvents).values({

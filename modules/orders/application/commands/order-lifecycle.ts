@@ -10,10 +10,19 @@ import {
   OrderAlreadyCompletedError,
   InvalidOrderTransitionError,
 } from "@/modules/orders/domain/errors/order-errors";
+import type { OrderActor, OrderStatus as LifecycleStatus } from "@/modules/orders/domain/rules/order-transitions";
 import { releaseOrderReservation } from "./reserve-order-inventory";
 
 export type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 export type OrderPaymentStatus = (typeof orderPaymentStatusEnum.enumValues)[number];
+
+/** Audit context threaded into history rows (migration 0017). */
+export interface LifecycleAudit {
+  actorType?: OrderActor;
+  actorId?: string;
+  eventType?: string;
+  correlationId?: string;
+}
 
 const TERMINAL_ORDER_STATUSES = new Set<OrderStatus>(["DELIVERED", "CANCELLED"]);
 const RELEASABLE_ORDER_STATUSES = new Set<OrderStatus>(["PENDING", "PROCESSING"]);
@@ -30,10 +39,16 @@ async function recordStatusHistory(
   orderId: string,
   status: OrderStatus,
   note?: string,
+  audit?: LifecycleAudit & { previousStatus?: LifecycleStatus | null },
 ): Promise<void> {
   await tx.insert(orderStatusHistories).values({
     orderId,
     status,
+    previousStatus: audit?.previousStatus ?? null,
+    eventType: audit?.eventType ?? status.toLowerCase(),
+    actorType: audit?.actorType ?? "system",
+    actorId: audit?.actorId ?? null,
+    correlationId: audit?.correlationId ?? null,
     note,
   });
 }
@@ -69,7 +84,7 @@ function validateCancellable(order: { status: OrderStatus; paymentStatus: OrderP
  */
 export async function cancelOrder(
   orderId: string,
-  options: { actorId?: string; requestId?: string; reason?: string } = {},
+  options: { actorId?: string; requestId?: string; reason?: string } & LifecycleAudit = {},
 ): Promise<void> {
   assertOrderExists(orderId);
 
@@ -125,7 +140,13 @@ export async function cancelOrder(
       })
       .where(eq(orders.id, orderId));
 
-    await recordStatusHistory(tx, orderId, "CANCELLED", options.reason ?? "Order cancelled");
+    await recordStatusHistory(tx, orderId, "CANCELLED", options.reason ?? "Order cancelled", {
+      previousStatus: order.status,
+      eventType: options.eventType ?? "cancelled",
+      actorType: options.actorType ?? "system",
+      actorId: options.actorId,
+      correlationId: options.correlationId ?? options.requestId,
+    });
 
     logger.info("Order cancelled and reservations released", { module: "orders", action: "orderCancelled", orderId, actorId: options.actorId });
   });
@@ -146,7 +167,7 @@ export async function cancelOrder(
  */
 export async function handlePaymentFailure(
   orderId: string,
-  options: { actorId?: string; requestId?: string; reason?: string } = {},
+  options: { actorId?: string; requestId?: string; reason?: string } & LifecycleAudit = {},
 ): Promise<void> {
   assertOrderExists(orderId);
 
@@ -196,7 +217,13 @@ export async function handlePaymentFailure(
       })
       .where(eq(orders.id, orderId));
 
-    await recordStatusHistory(tx, orderId, newOrderStatus, options.reason ?? "Payment failed");
+    await recordStatusHistory(tx, orderId, newOrderStatus, options.reason ?? "Payment failed", {
+      previousStatus: order.status,
+      eventType: options.eventType ?? "payment_failed",
+      actorType: options.actorType ?? "system",
+      actorId: options.actorId,
+      correlationId: options.correlationId ?? options.requestId,
+    });
 
     logger.info("Payment failure handled", { module: "orders", action: "paymentFailureHandled", orderId, actorId: options.actorId, previousStatus: order.status });
   });
@@ -217,7 +244,7 @@ export async function handlePaymentFailure(
  */
 export async function handleCheckoutExpiration(
   orderId: string,
-  options: { actorId?: string; requestId?: string; reason?: string } = {},
+  options: { actorId?: string; requestId?: string; reason?: string } & LifecycleAudit = {},
 ): Promise<void> {
   assertOrderExists(orderId);
 
@@ -270,7 +297,13 @@ export async function handleCheckoutExpiration(
       })
       .where(eq(orders.id, orderId));
 
-    await recordStatusHistory(tx, orderId, "CANCELLED", options.reason ?? "Checkout expired");
+    await recordStatusHistory(tx, orderId, "CANCELLED", options.reason ?? "Checkout expired", {
+      previousStatus: order.status,
+      eventType: options.eventType ?? "reservation_expired",
+      actorType: options.actorType ?? "system",
+      actorId: options.actorId,
+      correlationId: options.correlationId ?? options.requestId,
+    });
 
     logger.info("Checkout expired and reservations released", { module: "orders", action: "checkoutExpired", orderId, actorId: options.actorId });
   });

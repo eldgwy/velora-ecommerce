@@ -612,6 +612,11 @@ async function createOrderTx(
         await tx.insert(orderStatusHistories).values({
           orderId: order.id,
           status: "PENDING",
+          previousStatus: null,
+          eventType: "order_placed",
+          actorType: "customer",
+          actorId: user.id,
+          correlationId: ctx.idempotencyKey,
           note: "Order created",
         });
 
@@ -721,7 +726,7 @@ async function compensateReservationFailure(
   // Items were never reserved on shortage (all-or-nothing check), and the call
   // is a no-op for PENDING items — safe either way.
   try {
-    await cancelOrder(orderId, { actorId: "checkout", reason });
+    await cancelOrder(orderId, { actorId: "checkout", reason, actorType: "system", eventType: "cancelled" });
   } catch {
     // Best-effort: the order row stays consistent (PENDING, unreserved) and
     // the expiry job will still pick it up via checkoutExpiresAt.

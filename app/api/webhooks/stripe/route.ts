@@ -7,6 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { logger } from "@/shared/lib/logging/logger";
 import { verifyStripeSignature } from "@/modules/orders/application/webhooks/verify-signature";
 import { finalizeOrderPayment, handlePaymentFailureWebhook } from "@/modules/orders/application/commands/finalize-payment";
+import { dispatchOrderNotification } from "@/modules/notifications/application/order-emails";
 
 export const runtime = "nodejs";
 
@@ -134,6 +135,8 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
           requestId: eventId,
           provider: "stripe",
         });
+        // Post-commit notice only; a send failure never fails the webhook.
+        await dispatchOrderNotification(orderId, "payment_succeeded");
         result = { success: true };
         break;
 
@@ -146,6 +149,7 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
           provider: "stripe",
           reason: eventType,
         });
+        await dispatchOrderNotification(orderId, "payment_failed");
         result = { success: true };
         break;
 

@@ -263,6 +263,18 @@ export const orderStatusHistories = pgTable(
 
     note: text("note"),
 
+    // Audit trail (migration 0017): every state change records the previous
+    // state, event type, actor, and correlation id alongside the new state.
+    previousStatus: orderStatusEnum("previous_status"),
+
+    eventType: text("event_type"),
+
+    actorType: text("actor_type"),
+
+    actorId: text("actor_id"),
+
+    correlationId: text("correlation_id"),
+
     createdAt: timestamp("created_at", {
       mode: "date",
     })
@@ -286,6 +298,55 @@ export const orderStatusHistories = pgTable(
     ),
 
     index("order_status_history_status_idx").on(
+      table.status,
+    ),
+  ],
+);
+
+export const orderNotifications = pgTable(
+  "order_notifications",
+  {
+    id: uuid("id")
+      .defaultRandom()
+      .primaryKey(),
+
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id, {
+        onDelete: "cascade",
+      }),
+
+    type: text("type").notNull(),
+
+    status: text("status").notNull().default("QUEUED"),
+
+    createdAt: timestamp("created_at", {
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+
+    updatedAt: timestamp("updated_at", {
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+
+    sentAt: timestamp("sent_at", {
+      mode: "date",
+    }),
+  },
+  (table) => [
+    uniqueIndex("order_notifications_order_type_unique").on(
+      table.orderId,
+      table.type,
+    ),
+
+    index("order_notifications_order_id_idx").on(
+      table.orderId,
+    ),
+
+    index("order_notifications_status_idx").on(
       table.status,
     ),
   ],
