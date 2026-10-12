@@ -37,6 +37,10 @@ const envSchema = z.object({
 
   // Internal job scheduling
   CRON_SECRET: z.string().optional(),
+
+  // Guest cart cookie integrity (FR-06). Required in production; dev/test
+  // fall back to a non-secret placeholder via getGuestCartSecret().
+  GUEST_CART_SECRET: z.string().optional(),
   
   // Reservation expiration configuration
   RESERVATION_EXPIRY_MINUTES: z.coerce.number().int().positive().default(30),

@@ -23,7 +23,12 @@ export const cacheTags = {
    // Reviews
    reviewsByProduct: (productId: string) => `reviews:product:${productId}`,
 
-   // Media
-   imagesByProduct: (productId: string) => `images:product:${productId}`,
-   image: (id: string) => `image:${id}`,
+    // Media
+    imagesByProduct: (productId: string) => `images:product:${productId}`,
+    image: (id: string) => `image:${id}`,
+
+    // Cart (dynamic per owner; invalidated after every cart DB commit)
+    cart: (cartId: string) => `cart:${cartId}`,
+    userCart: (userId: string) => `cart:user:${userId}`,
+    guestCart: (guestId: string) => `cart:guest:${guestId}`,
 } as const;

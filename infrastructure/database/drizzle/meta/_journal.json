@@ -92,6 +92,20 @@
       "when": 1791816200000,
       "tag": "0012_fix_rate_limit_last_request_bigint",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791900000000,
+      "tag": "0013_cart_guest_and_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791900000001,
+      "tag": "0014_cart_missing_indexes",
+      "breakpoints": true
     }
   ]
 }

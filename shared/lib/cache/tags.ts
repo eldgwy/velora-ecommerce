@@ -74,3 +74,18 @@ export async function invalidateImageCache(imageId: string, productId: string): 
   updateTag(cacheTags.product(productId));
   updateTag(cacheTags.productsListing);
 }
+
+/**
+ * Invalidate cart cache after a successful cart database commit.
+ * Cart pages are dynamic (never trust cache for cart state), but tagged
+ * fetches keyed by cart/owner still need invalidation on every mutation.
+ */
+export async function invalidateCartCache(options: {
+  cartId?: string;
+  userId?: string;
+  guestId?: string;
+}): Promise<void> {
+  if (options.cartId) updateTag(cacheTags.cart(options.cartId));
+  if (options.userId) updateTag(cacheTags.userCart(options.userId));
+  if (options.guestId) updateTag(cacheTags.guestCart(options.guestId));
+}

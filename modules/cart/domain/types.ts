@@ -16,6 +16,7 @@ export interface CartItem {
 export interface Cart {
   id: string;
   userId: string | null;
+  guestId: string | null;
   status: CartStatus;
   createdAt: Date;
   updatedAt: Date;
