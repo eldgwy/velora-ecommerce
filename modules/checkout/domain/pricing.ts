@@ -1,5 +1,10 @@
 import { createHash } from "crypto";
 
+import {
+  couponDiscountForSubtotal,
+  percentOfCents,
+} from "./calculation";
+
 /**
  * Pure checkout pricing rules (domain layer — no framework or DB imports).
  * All authoritative money math runs in integer cents; numeric-string columns
@@ -19,7 +24,8 @@ export function calculateTaxCents(
   _taxableCents: number,
   rateBps: number = TAX_RATE_BPS,
 ): number {
-  return Math.round((_taxableCents * rateBps) / 10_000);
+  // Exact decimal percentage; single half-up rounding at the aggregate.
+  return percentOfCents(_taxableCents, rateBps);
 }
 
 export type CouponKind = "PERCENTAGE" | "FIXED";
@@ -33,26 +39,13 @@ export interface CouponTerms {
 /**
  * FR-12.03 discount math: PERCENTAGE capped by maximumDiscountAmount,
  * FIXED capped at the subtotal. Never negative, never exceeds the base.
+ * Exact decimal intermediates; half-up rounding once on the result.
  */
 export function calculateCouponDiscountCents(
   subtotalCents: number,
   coupon: CouponTerms,
 ): number {
-  if (subtotalCents <= 0) return 0;
-  if (coupon.type === "PERCENTAGE") {
-    const pct = Number(coupon.value);
-    if (!Number.isFinite(pct) || pct <= 0) return 0;
-    const raw = Math.round((subtotalCents * pct) / 100);
-    const cap =
-      coupon.maximumDiscountAmount !== null &&
-      coupon.maximumDiscountAmount !== undefined
-        ? Math.round(Number(coupon.maximumDiscountAmount) * 100)
-        : raw;
-    return Math.max(0, Math.min(raw, Number.isFinite(cap) ? cap : raw, subtotalCents));
-  }
-  const fixed = Math.round(Number(coupon.value) * 100);
-  if (!Number.isFinite(fixed) || fixed <= 0) return 0;
-  return Math.min(fixed, subtotalCents);
+  return couponDiscountForSubtotal(subtotalCents, coupon);
 }
 
 export interface OrderTotals {

@@ -7,25 +7,25 @@ import { toast } from "sonner";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Separator } from "@/shared/components/ui/separator";
-import { Spinner } from "@/shared/components/ui/spinner";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
+import { Spinner } from "@/shared/components/ui/spinner";
 import { formatPrice } from "@/shared/lib/utils";
 import {
   getCheckoutDataAction,
-  placeOrderAction,
   retryPaymentAction,
 } from "@/modules/checkout/presentation/actions/checkout.actions";
 import type { CheckoutResult } from "@/modules/checkout/application/commands/create-order";
 import type { CheckoutSummary } from "@/modules/checkout/application/queries/checkout-summary";
+import { CheckoutReview } from "@/modules/checkout/presentation/components/checkout-review";
 
 interface CheckoutViewProps {
   initial: CheckoutSummary;
 }
 
-type BillingMode = "same" | "saved" | "new";
+export type BillingMode = "same" | "saved" | "new";
 
-function newAddressFields() {
+export function newAddressFields() {
   return {
     country: "US",
     city: "",
@@ -36,14 +36,26 @@ function newAddressFields() {
   };
 }
 
+export type AddressFields = ReturnType<typeof newAddressFields>;
+
+const STEPS = [
+  "Bag",
+  "Delivery",
+  "Billing",
+  "Options",
+  "Review",
+] as const;
+
 /**
- * Single-page checkout: address → shipping → coupon → review → place order.
- * The client only collects references (address ids, method ids, coupon code);
- * every charge is server-calculated. One idempotency key per attempt guards
- * double-clicks and retries; the server is the correctness backstop.
+ * Sequential checkout wizard. Each step gates on the previous step's
+ * client-side completeness; the server revalidates everything regardless.
+ * Form state is preserved across steps. Only references travel to the
+ * server — amounts are always server-computed.
  */
 export function CheckoutView({ initial }: CheckoutViewProps) {
   const [summary, setSummary] = useState<CheckoutSummary>(initial);
+  const [step, setStep] = useState(0);
+  const [visited, setVisited] = useState<Set<number>>(new Set([0]));
   const [shipAddrId, setShipAddrId] = useState<string>(
     initial.addresses.find((a) => a.isDefault)?.id ?? initial.addresses[0]?.id ?? "new",
   );
@@ -108,21 +120,15 @@ export function CheckoutView({ initial }: CheckoutViewProps) {
     notes: null,
   });
 
-  const handlePlaceOrder = () => {
+  const goTo = (next: number) => {
     setFailure(null);
-    startPlacing(async () => {
-      const res = await placeOrderAction(buildInput(), attemptKey());
-      if (res.ok) {
-        setResult(res.data);
-        toast.success(`Order ${res.data.orderNumber} placed.`);
-      } else {
-        setFailure({ message: res.error, code: res.code });
-        if (res.code === "CART_CONFLICT" || res.code === "STOCK_CONFLICT") {
-          const fresh = await getCheckoutDataAction();
-          if (fresh.ok && fresh.data) setSummary(fresh.data);
-        }
-      }
-    });
+    setStep(next);
+    setVisited((prev) => new Set(prev).add(next));
+  };
+
+  const refreshSummary = async () => {
+    const fresh = await getCheckoutDataAction();
+    if (fresh.ok && fresh.data) setSummary(fresh.data);
   };
 
   const handleRetryPayment = (orderId: string) => {
@@ -130,8 +136,6 @@ export function CheckoutView({ initial }: CheckoutViewProps) {
       const res = await retryPaymentAction(orderId);
       if (res.ok) {
         toast.success("Payment initialization updated.");
-        const fresh = await getCheckoutDataAction();
-        void fresh;
       } else {
         toast.error(res.error);
       }
@@ -161,41 +165,112 @@ export function CheckoutView({ initial }: CheckoutViewProps) {
     );
   }
 
+  const shipComplete =
+    shipAddrId !== "new" || requiredAddressFields(shipNew).every(Boolean);
+  const billComplete =
+    billingMode === "same" ||
+    (billingMode === "saved" && billAddrId !== "") ||
+    (billingMode === "new" && requiredAddressFields(billNew).every(Boolean));
+  const stepValid = [
+    validation.valid,
+    shipComplete,
+    billComplete,
+    true,
+    true,
+  ][step];
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-      <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
+      <div>
         <h1 className="text-2xl font-semibold">Checkout</h1>
+        <ol className="mt-3 flex flex-wrap items-center gap-1" aria-label="Checkout steps">
+          {STEPS.map((label, i) => {
+            const reachable = visited.has(i) || i === 0;
+            const current = i === step;
+            return (
+              <li key={label} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={!reachable || placing}
+                  onClick={() => reachable && goTo(i)}
+                  aria-current={current ? "step" : undefined}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors motion-reduce:transition-none ${
+                    current
+                      ? "bg-primary text-primary-foreground"
+                      : reachable
+                        ? "bg-secondary text-secondary-foreground hover:bg-muted"
+                        : "bg-muted text-muted-foreground"
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {i + 1} · {label}
+                </button>
+                {i < STEPS.length - 1 ? (
+                  <span aria-hidden="true" className="text-muted-foreground">→</span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      </div>
 
-        {!validation.valid ? (
-          <div className="rounded-xl bg-destructive/5 p-4 ring-1 ring-destructive/20">
-            <p className="text-sm font-semibold text-destructive">
-              Your bag needs attention before you can pay
+      {!validation.valid ? (
+        <div className="rounded-xl bg-destructive/5 p-4 ring-1 ring-destructive/20">
+          <p className="text-sm font-semibold text-destructive">
+            Your bag needs attention before you can pay
+          </p>
+          <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
+            {validation.errors.map((e, i) => (
+              <li key={i}>{e.message}</li>
+            ))}
+          </ul>
+          <Button size="sm" variant="outline" className="mt-2" render={<Link href="/cart">Review bag</Link>} />
+        </div>
+      ) : null}
+
+      {failure ? (
+        <div className="rounded-xl bg-destructive/5 p-4 ring-1 ring-destructive/20">
+          <p className="text-sm font-semibold text-destructive">Checkout failed</p>
+          <p className="text-xs text-muted-foreground">{failure.message}</p>
+          {failure.code === "COUPON_INVALID" ? null : (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {failure.code === "STOCK_CONFLICT"
+                ? "Start a new attempt after reviewing your bag — your previous key is spent."
+                : "You can safely retry; duplicate orders are prevented."}
             </p>
-            <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
-              {validation.errors.map((e, i) => (
-                <li key={i}>{e.message}</li>
-              ))}
-            </ul>
-            <Button size="sm" variant="outline" className="mt-2" render={<Link href="/cart">Review bag</Link>} />
-          </div>
-        ) : null}
+          )}
+        </div>
+      ) : null}
 
-        {failure ? (
-          <div className="rounded-xl bg-destructive/5 p-4 ring-1 ring-destructive/20">
-            <p className="text-sm font-semibold text-destructive">Checkout failed</p>
-            <p className="text-xs text-muted-foreground">{failure.message}</p>
-            {failure.code === "COUPON_INVALID" ? null : (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {failure.code === "STOCK_CONFLICT"
-                  ? "Start a new attempt after reviewing your bag — your previous key is spent."
-                  : "You can safely retry; duplicate orders are prevented."}
-              </p>
-            )}
+      {step === 0 ? (
+        <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Bag review">
+          <h2 className="mb-3 text-base font-semibold">Your bag</h2>
+          <ul className="flex flex-col gap-2 text-sm">
+            {detail.items.map((i) => (
+              <li key={i.id} className="flex justify-between gap-2">
+                <span className="text-muted-foreground">
+                  {i.productName} × {i.quantity}
+                </span>
+                <span className="font-medium">{formatPrice(i.lineTotal)}</span>
+              </li>
+            ))}
+          </ul>
+          <Separator className="my-3" />
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Subtotal</span>
+            <span className="font-medium">{formatPrice(detail.subtotal)}</span>
           </div>
-        ) : null}
+          {Number(detail.discountTotal) > 0 ? (
+            <div className="flex justify-between text-sm text-primary">
+              <span>Promotions</span>
+              <span>−{formatPrice(detail.discountTotal)}</span>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
+      {step === 1 ? (
         <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Delivery address">
-          <h2 className="mb-3 text-base font-semibold">1 · Delivery address</h2>
+          <h2 className="mb-3 text-base font-semibold">Delivery address</h2>
           <div className="flex flex-col gap-2">
             {summary.addresses.map((a) => (
               <label key={a.id} className="flex cursor-pointer items-start gap-2 rounded-lg p-2 hover:bg-muted">
@@ -239,9 +314,11 @@ export function CheckoutView({ initial }: CheckoutViewProps) {
             />
           </div>
         </section>
+      ) : null}
 
+      {step === 2 ? (
         <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Billing address">
-          <h2 className="mb-3 text-base font-semibold">2 · Billing address</h2>
+          <h2 className="mb-3 text-base font-semibold">Billing address</h2>
           <div className="flex flex-wrap gap-2">
             {(["same", "saved", "new"] as BillingMode[]).map((m) => (
               <Button
@@ -255,124 +332,140 @@ export function CheckoutView({ initial }: CheckoutViewProps) {
             ))}
           </div>
           {billingMode === "saved" ? (
-            <select
-              className="mt-3 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-              value={billAddrId}
-              onChange={(e) => setBillAddrId(e.target.value)}
-              aria-label="Billing address"
-            >
-              {summary.addresses.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.label} — {a.city}, {a.country}
-                </option>
-              ))}
-            </select>
+            summary.addresses.length === 0 ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                No saved addresses yet — pick “Same as delivery” or enter a new address.
+              </p>
+            ) : (
+              <select
+                className="mt-3 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                value={billAddrId}
+                onChange={(e) => setBillAddrId(e.target.value)}
+                aria-label="Billing address"
+              >
+                {summary.addresses.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label} — {a.city}, {a.country}
+                  </option>
+                ))}
+              </select>
+            )
           ) : null}
           {billingMode === "new" ? (
             <AddressForm value={billNew} onChange={setBillNew} prefix="bill" />
           ) : null}
         </section>
+      ) : null}
 
-        <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Shipping method">
-          <h2 className="mb-3 text-base font-semibold">3 · Delivery speed</h2>
-          <div className="flex flex-col gap-2">
-            {summary.shippingMethods.map((m) => (
-              <label key={m.id} className="flex cursor-pointer items-center gap-2 rounded-lg p-2 hover:bg-muted">
-                <input
-                  type="radio"
-                  name="ship-method"
-                  checked={shippingMethod === m.id}
-                  onChange={() => setShippingMethod(m.id)}
-                  className="accent-(--primary)"
-                />
-                <span className="text-sm font-medium">{m.label}</span>
-                <span className="text-xs text-muted-foreground">{m.etaDays}</span>
-              </label>
-            ))}
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Standard delivery is free over {formatPrice("75.00")}. Final charges are calculated on the server.
-          </p>
-        </section>
-
-        <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Coupon and payment">
-          <h2 className="mb-3 text-base font-semibold">4 · Coupon & payment</h2>
-          <div className="flex gap-2">
-            <Input
-              value={couponCode}
-              onChange={(e) => setCouponCode(e.target.value)}
-              placeholder="Coupon code (optional)"
-              aria-label="Coupon code"
-              className="uppercase"
-            />
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant={paymentMethod === "cod" ? "default" : "outline"}
-              onClick={() => setPaymentMethod("cod")}
-            >
-              Cash on delivery
-            </Button>
-            <Button
-              size="sm"
-              variant={paymentMethod === "card" ? "default" : "outline"}
-              onClick={() => setPaymentMethod("card")}
-            >
-              Card (Stripe)
-            </Button>
-          </div>
-        </section>
-      </div>
-
-      <aside className="flex flex-col gap-4 rounded-xl bg-card p-5 ring-1 ring-foreground/10 lg:sticky lg:top-6">
-        <h2 className="text-base font-semibold">Order summary</h2>
-        <ul className="flex flex-col gap-2 text-sm">
-          {detail.items.map((i) => (
-            <li key={i.id} className="flex justify-between gap-2">
-              <span className="text-muted-foreground">
-                {i.productName} × {i.quantity}
-              </span>
-              <span className="font-medium">{formatPrice(i.lineTotal)}</span>
-            </li>
-          ))}
-        </ul>
-        <Separator />
-        <dl className="flex flex-col gap-1 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-muted-foreground">Subtotal</dt>
-            <dd>{formatPrice(detail.subtotal)}</dd>
-          </div>
-          {Number(detail.discountTotal) > 0 ? (
-            <div className="flex justify-between text-primary">
-              <dt>Promotions</dt>
-              <dd>−{formatPrice(detail.discountTotal)}</dd>
+      {step === 3 ? (
+        <>
+          <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Shipping method">
+            <h2 className="mb-3 text-base font-semibold">Delivery speed</h2>
+            <div className="flex flex-col gap-2">
+              {summary.shippingMethods.map((m) => (
+                <label key={m.id} className="flex cursor-pointer items-center gap-2 rounded-lg p-2 hover:bg-muted">
+                  <input
+                    type="radio"
+                    name="ship-method"
+                    checked={shippingMethod === m.id}
+                    onChange={() => setShippingMethod(m.id)}
+                    className="accent-(--primary)"
+                  />
+                  <span className="text-sm font-medium">{m.label}</span>
+                  <span className="text-xs text-muted-foreground">{m.etaDays}</span>
+                </label>
+              ))}
             </div>
-          ) : null}
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <dt>Shipping & taxes</dt>
-            <dd>at checkout</dd>
-          </div>
-        </dl>
-        <Button size="lg" disabled={placing || !validation.valid} onClick={handlePlaceOrder}>
-          {placing ? <Spinner className="size-4" /> : null}
-          {placing ? "Placing order…" : "Place order"}
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          Totals are calculated on the server at order time. Duplicate submissions are safe.
-        </p>
-      </aside>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Standard delivery is free over {formatPrice("75.00")}. Final charges are calculated on the server.
+            </p>
+          </section>
+
+          <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Coupon and payment">
+            <h2 className="mb-3 text-base font-semibold">Coupon & payment</h2>
+            <div className="flex gap-2">
+              <Input
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value)}
+                placeholder="Coupon code (optional)"
+                aria-label="Coupon code"
+                className="uppercase"
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant={paymentMethod === "cod" ? "default" : "outline"}
+                onClick={() => setPaymentMethod("cod")}
+              >
+                Cash on delivery
+              </Button>
+              <Button
+                size="sm"
+                variant={paymentMethod === "card" ? "default" : "outline"}
+                onClick={() => setPaymentMethod("card")}
+              >
+                Card (Stripe)
+              </Button>
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {step === 4 ? (
+        <CheckoutReview
+          buildInput={buildInput}
+          attemptKey={attemptKey}
+          startPlacing={startPlacing}
+          placing={placing}
+          failure={failure}
+          setFailure={setFailure}
+          onPlaced={(order) => {
+            setResult(order);
+            toast.success(`Order ${order.orderNumber} placed.`);
+          }}
+          onConflictRefresh={refreshSummary}
+        />
+      ) : null}
+
+      {step < 4 ? (
+        <div className="flex items-center justify-between">
+          {step > 0 ? (
+            <Button variant="outline" onClick={() => goTo(step - 1)}>
+              ← Back
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button
+            disabled={!stepValid || placing}
+            onClick={() => stepValid && goTo(step + 1)}
+          >
+            Continue →
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <Button variant="outline" onClick={() => goTo(3)}>
+            ← Back
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
-function AddressForm({
+function requiredAddressFields(v: AddressFields): Array<string | undefined> {
+  return [v.country, v.city, v.state, v.postalCode].map((s) => s.trim() || undefined);
+}
+
+export function AddressForm({
   value,
   onChange,
   prefix,
 }: {
-  value: ReturnType<typeof newAddressFields>;
-  onChange: (v: ReturnType<typeof newAddressFields>) => void;
+  value: AddressFields;
+  onChange: (v: AddressFields) => void;
   prefix: string;
 }) {
   const set = (k: keyof typeof value) => (e: React.ChangeEvent<HTMLInputElement>) =>

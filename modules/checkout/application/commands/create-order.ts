@@ -18,7 +18,6 @@ import {
 import {
   MAX_QUANTITY_PER_ITEM,
   isPurchasable,
-  toCents,
 } from "@/modules/cart/domain/rules/cart-rules";
 import { ensureCustomerProfile } from "@/services/customer.service";
 import { reserveOrderInventory } from "@/modules/orders/application/commands/reserve-order-inventory";
@@ -34,17 +33,26 @@ import {
   EmptyCartError,
   IdempotencyConflictError,
   StockConflictError,
+  TotalChangedError,
 } from "@/modules/checkout/domain/errors";
 import {
   CHECKOUT_CURRENCY,
-  calculateOrderTotals,
-  calculateTaxCents,
-  formatCents,
   generateOrderNumber,
   hashCheckoutInput,
 } from "@/modules/checkout/domain/pricing";
 import {
-  calculateShippingCents,
+  PRICING_POLICY_VERSION,
+  calculateCheckoutTotals,
+  type TotalsBreakdown,
+} from "@/modules/checkout/domain/calculation";
+import {
+  fromMinorUnits,
+  toMinorUnits,
+} from "@/modules/checkout/domain/money";
+import { resolveTaxRule } from "@/modules/checkout/domain/tax";
+import {
+  calculateShipmentWeightGrams,
+  quoteShipping,
   type ShippingMethodId,
 } from "@/modules/checkout/domain/shipping";
 import {
@@ -105,6 +113,7 @@ export interface CheckoutLine {
   unitPrice: string;
   discountPerUnit: string;
   lineSubtotal: string;
+  promotionId: string | null;
 }
 
 export interface CheckoutResult {
@@ -115,9 +124,14 @@ export interface CheckoutResult {
   promotionDiscount: string;
   couponDiscount: string;
   shipping: string;
+  shippingMethod: ShippingMethodId;
   tax: string;
+  taxJurisdiction: string;
+  taxRateBps: number;
+  taxableBase: string;
   total: string;
   currency: string;
+  pricingPolicyVersion: string;
   payment: PaymentInitResult;
   reservationExpiresAt: string | null;
   /** True when this response replays an earlier identical attempt. */
@@ -237,6 +251,9 @@ interface CanonicalCheckout {
   contactPhone: string | null;
   paymentMethod: "card" | "cod";
   notes: string | null;
+  /** Engine version that will price this intent; replays across an engine
+   *  upgrade mismatch instead of returning foreign totals. */
+  pricingPolicyVersion: string;
 }
 
 function canonicalize(
@@ -254,6 +271,7 @@ function canonicalize(
     contactPhone: input.contactPhone?.trim() || null,
     paymentMethod: input.paymentMethod,
     notes: input.notes?.trim() || null,
+    pricingPolicyVersion: PRICING_POLICY_VERSION,
   };
 }
 
@@ -282,6 +300,7 @@ export async function placeOrder(
   user: CheckoutUser,
   input: CheckoutInput,
   idempotencyKey: string,
+  opts?: { expectedTotalCents?: number },
 ): Promise<CheckoutResult> {
   if (!/^[0-9a-fA-F-]{8,64}$/.test(idempotencyKey)) {
     throw new IdempotencyConflictError();
@@ -347,7 +366,7 @@ export async function placeOrder(
   let created: Tx1Result;
   try {
     created = await createOrderTx(
-      user, input, { cartId, lines: validation.billable, shipping, billing, phone, canonical, checkoutHash, idempotencyKey },
+      user, input, { cartId, lines: validation.billable, shipping, billing, phone, canonical, checkoutHash, idempotencyKey, expectedTotalCents: opts?.expectedTotalCents },
     );
   } catch (error) {
     if (error instanceof ReplaySignal) {
@@ -379,24 +398,31 @@ export async function placeOrder(
     }
   }
 
-  // 6. Payment initialization (outside inventory locks).
+  // 6. Payment initialization (outside inventory locks). The provider
+  // amount is the persisted authoritative total, never a client figure.
   const payment = await initializeOrderPayment(
-    user.id, created.orderId, input.paymentMethod, created.totalCents, CHECKOUT_CURRENCY,
+    user.id, created.orderId, input.paymentMethod, created.breakdown.totalCents, CHECKOUT_CURRENCY,
   );
 
   await invalidateCheckoutCaches(user.id, created.cartId, validation.billable);
 
+  const b = created.breakdown;
   return {
     orderId: created.orderId,
     orderNumber: created.orderNumber,
     lines: created.lines,
-    subtotal: formatCents(created.subtotalCents),
-    promotionDiscount: formatCents(created.promotionDiscountCents),
-    couponDiscount: formatCents(created.couponDiscountCents),
-    shipping: formatCents(created.shippingCents),
-    tax: formatCents(created.taxCents),
-    total: formatCents(created.totalCents),
+    subtotal: fromMinorUnits(b.subtotalCents, CHECKOUT_CURRENCY),
+    promotionDiscount: fromMinorUnits(b.promotionDiscountCents, CHECKOUT_CURRENCY),
+    couponDiscount: fromMinorUnits(b.couponDiscountCents, CHECKOUT_CURRENCY),
+    shipping: fromMinorUnits(b.shippingCents, CHECKOUT_CURRENCY),
+    shippingMethod: b.shippingMethod,
+    tax: fromMinorUnits(b.taxCents, CHECKOUT_CURRENCY),
+    taxJurisdiction: b.taxJurisdiction,
+    taxRateBps: b.taxRateBps,
+    taxableBase: fromMinorUnits(b.taxableBaseCents, CHECKOUT_CURRENCY),
+    total: fromMinorUnits(b.totalCents, CHECKOUT_CURRENCY),
     currency: CHECKOUT_CURRENCY,
+    pricingPolicyVersion: b.pricingPolicyVersion,
     payment,
     reservationExpiresAt: created.expiresAt?.toISOString() ?? null,
     replayed: false,
@@ -415,6 +441,8 @@ interface BillableLine {
   sku: string;
   unitPriceCents: number;
   discountPerUnitCents: number;
+  promotionId: string | null;
+  weightGrams: number | null;
 }
 
 interface Revalidation {
@@ -448,7 +476,7 @@ async function revalidateLines(
       items.push({ variantId: line.variantId, inStock: false });
       continue;
     }
-    const unitPriceCents = toCents(entry.effectivePrice);
+    const unitPriceCents = toMinorUnits(entry.effectivePrice, CHECKOUT_CURRENCY);
     billable.push({
       variantId: line.variantId,
       quantity: line.quantity,
@@ -457,6 +485,8 @@ async function revalidateLines(
       sku: entry.sku ?? "",
       unitPriceCents,
       discountPerUnitCents: entry.discountPerUnitCents,
+      promotionId: entry.promotion?.id ?? null,
+      weightGrams: entry.weightGrams,
     });
     items.push({ variantId: line.variantId, inStock: true });
   }
@@ -490,12 +520,7 @@ interface Tx1Result {
   cartId: string;
   couponId: string | null;
   lines: CheckoutLine[];
-  subtotalCents: number;
-  promotionDiscountCents: number;
-  couponDiscountCents: number;
-  shippingCents: number;
-  taxCents: number;
-  totalCents: number;
+  breakdown: TotalsBreakdown;
   expiresAt: Date | null;
 }
 
@@ -511,6 +536,7 @@ async function createOrderTx(
     canonical: CanonicalCheckout;
     checkoutHash: string;
     idempotencyKey: string;
+    expectedTotalCents?: number;
   },
 ): Promise<Tx1Result> {
   let orderNumber = generateOrderNumber();
@@ -547,20 +573,44 @@ async function createOrderTx(
           );
         }
 
-        const couponDiscountCents = coupon?.discountCents ?? 0;
-        const shippingCents = calculateShippingCents(
-          input.shippingMethod, ctxSubtotal(ctx) - couponDiscountCents,
+        // Authoritative totals via the decimal engine: destination + weight
+        // resolved shipping, jurisdiction-resolved tax. All server-side.
+        const taxRule = resolveTaxRule(ctx.shipping.country);
+        const weightGrams = calculateShipmentWeightGrams(
+          ctx.lines.map((l) => ({ weightGrams: l.weightGrams, quantity: l.quantity })),
         );
-        const taxCents = calculateTaxCents(
-          ctxSubtotal(ctx) - couponDiscountCents + shippingCents,
-        );
-        const totals = calculateOrderTotals({
-          subtotalCents: ctxSubtotal(ctx),
-          promotionDiscountCents: ctxPromotion(ctx),
-          couponDiscountCents,
-          shippingCents,
-          taxCents,
+        const quote = quoteShipping({
+          method: input.shippingMethod,
+          country: ctx.shipping.country,
+          subtotalAfterDiscountsCents: ctxSubtotal(ctx) - (coupon?.discountCents ?? 0),
+          weightGrams,
+          taxesShipping: taxRule.taxesShipping,
         });
+        const breakdown = calculateCheckoutTotals({
+          currency: CHECKOUT_CURRENCY,
+          lines: ctx.lines.map((l) => ({
+            variantId: l.variantId,
+            quantity: l.quantity,
+            unitPriceCents: l.unitPriceCents,
+            discountPerUnitCents: l.discountPerUnitCents,
+          })),
+          couponDiscountCents: coupon?.discountCents ?? 0,
+          shippingMethod: input.shippingMethod,
+          shippingCents: quote.feeCents,
+          taxableShippingCents: quote.taxableCents,
+          taxJurisdiction: taxRule.jurisdiction,
+          taxRateBps: taxRule.rateBps,
+        });
+
+        // Preview confirmation: the client echoes the previewed total (minor
+        // units, integer — never trusted for charging). Any drift since the
+        // preview aborts BEFORE anything is persisted.
+        if (
+          ctx.expectedTotalCents !== undefined &&
+          ctx.expectedTotalCents !== breakdown.totalCents
+        ) {
+          throw new TotalChangedError();
+        }
 
         const expiresAt =
           input.paymentMethod === "cod"
@@ -573,17 +623,22 @@ async function createOrderTx(
             orderNumber,
             userId: user.id,
             status: "PENDING",
-            subtotal: formatCents(ctxSubtotal(ctx)),
-            discountAmount: formatCents(ctxPromotion(ctx) + couponDiscountCents),
-            shippingAmount: formatCents(shippingCents),
-            taxAmount: formatCents(taxCents),
-            totalAmount: formatCents(totals.totalCents),
+            subtotal: fromMinorUnits(breakdown.subtotalCents, CHECKOUT_CURRENCY),
+            discountAmount: fromMinorUnits(breakdown.totalDiscountCents, CHECKOUT_CURRENCY),
+            shippingAmount: fromMinorUnits(breakdown.shippingCents, CHECKOUT_CURRENCY),
+            taxAmount: fromMinorUnits(breakdown.taxCents, CHECKOUT_CURRENCY),
+            totalAmount: fromMinorUnits(breakdown.totalCents, CHECKOUT_CURRENCY),
             currency: CHECKOUT_CURRENCY,
             paymentStatus: "PENDING",
             checkoutExpiresAt: expiresAt,
             notes: ctx.canonical.notes,
             idempotencyKey: ctx.idempotencyKey,
             checkoutHash: ctx.checkoutHash,
+            shippingMethod: breakdown.shippingMethod,
+            taxJurisdiction: breakdown.taxJurisdiction,
+            taxRateBps: breakdown.taxRateBps,
+            taxableBase: fromMinorUnits(breakdown.taxableBaseCents, CHECKOUT_CURRENCY),
+            pricingPolicyVersion: breakdown.pricingPolicyVersion,
           })
           .returning({ id: orders.id, orderNumber: orders.orderNumber });
         if (!order) throw new Error("Order insert failed");
@@ -596,11 +651,13 @@ async function createOrderTx(
             variantName: null,
             sku: line.sku,
             quantity: line.quantity,
-            unitPrice: formatCents(line.unitPriceCents),
-            discountAmount: formatCents(line.discountPerUnitCents * line.quantity),
-            totalAmount: formatCents(
+            unitPrice: fromMinorUnits(line.unitPriceCents, CHECKOUT_CURRENCY),
+            discountAmount: fromMinorUnits(line.discountPerUnitCents * line.quantity, CHECKOUT_CURRENCY),
+            totalAmount: fromMinorUnits(
               line.unitPriceCents * line.quantity,
+              CHECKOUT_CURRENCY,
             ),
+            promotionId: line.promotionId,
           });
         }
 
@@ -624,14 +681,14 @@ async function createOrderTx(
           orderId: order.id,
           provider: input.paymentMethod === "cod" ? "cod" : "stripe",
           providerPaymentId: null,
-          amount: formatCents(totals.totalCents),
+          amount: fromMinorUnits(breakdown.totalCents, CHECKOUT_CURRENCY),
           currency: CHECKOUT_CURRENCY,
           status: "PENDING",
           paymentMethod: input.paymentMethod === "cod" ? "CASH_ON_DELIVERY" : "CARD",
         });
 
         if (coupon) {
-          await consumeCouponUsage(tx, coupon.id, user.id, order.id, couponDiscountCents);
+          await consumeCouponUsage(tx, coupon.id, user.id, order.id, breakdown.couponDiscountCents);
         }
 
         await tx
@@ -649,16 +706,12 @@ async function createOrderTx(
             quantity: l.quantity,
             productName: l.productName,
             sku: l.sku,
-            unitPrice: formatCents(l.unitPriceCents),
-            discountPerUnit: formatCents(l.discountPerUnitCents),
-            lineSubtotal: formatCents(l.unitPriceCents * l.quantity),
+            unitPrice: fromMinorUnits(l.unitPriceCents, CHECKOUT_CURRENCY),
+            discountPerUnit: fromMinorUnits(l.discountPerUnitCents, CHECKOUT_CURRENCY),
+            lineSubtotal: fromMinorUnits(l.unitPriceCents * l.quantity, CHECKOUT_CURRENCY),
+            promotionId: l.promotionId,
           })),
-          subtotalCents: ctxSubtotal(ctx),
-          promotionDiscountCents: ctxPromotion(ctx),
-          couponDiscountCents,
-          shippingCents,
-          taxCents,
-          totalCents: totals.totalCents,
+          breakdown,
           expiresAt,
         };
       });
@@ -686,10 +739,6 @@ async function createOrderTx(
 
 function ctxSubtotal(ctx: { lines: BillableLine[] }): number {
   return ctx.lines.reduce((s, l) => s + l.unitPriceCents * l.quantity, 0);
-}
-
-function ctxPromotion(ctx: { lines: BillableLine[] }): number {
-  return ctx.lines.reduce((s, l) => s + l.discountPerUnitCents * l.quantity, 0);
 }
 
 function toOrderAddress(
@@ -858,8 +907,8 @@ async function loadOrderResult(orderId: string): Promise<Omit<CheckoutResult, "r
     .select({ discountAmount: couponUsages.discountAmount })
     .from(couponUsages)
     .where(eq(couponUsages.orderId, orderId));
-  const couponCents = usage?.discountAmount ? toCents(usage.discountAmount) : 0;
-  const totalDiscountCents = toCents(order.discountAmount);
+  const couponCents = usage?.discountAmount ? toMinorUnits(usage.discountAmount, CHECKOUT_CURRENCY) : 0;
+  const totalDiscountCents = toMinorUnits(order.discountAmount, CHECKOUT_CURRENCY);
   const promotionCents = Math.max(0, totalDiscountCents - couponCents);
   return {
     orderId: order.id,
@@ -872,14 +921,20 @@ async function loadOrderResult(orderId: string): Promise<Omit<CheckoutResult, "r
       unitPrice: l.unitPrice ?? "0.00",
       discountPerUnit: "0.00",
       lineSubtotal: l.totalAmount ?? "0.00",
+      promotionId: l.promotionId,
     })),
     subtotal: order.subtotal,
-    promotionDiscount: formatCents(promotionCents),
-    couponDiscount: formatCents(couponCents),
+    promotionDiscount: fromMinorUnits(promotionCents, CHECKOUT_CURRENCY),
+    couponDiscount: fromMinorUnits(couponCents, CHECKOUT_CURRENCY),
     shipping: order.shippingAmount,
+    shippingMethod: (order.shippingMethod ?? "STANDARD") as ShippingMethodId,
     tax: order.taxAmount,
+    taxJurisdiction: order.taxJurisdiction ?? "UNCONFIGURED",
+    taxRateBps: order.taxRateBps ?? 0,
+    taxableBase: order.taxableBase ?? "0.00",
     total: order.totalAmount,
     currency: order.currency,
+    pricingPolicyVersion: order.pricingPolicyVersion ?? "1",
     payment: {
       paymentId: paymentRow?.id ?? "",
       provider: (paymentRow?.provider as "stripe" | "cod") ?? "stripe",

@@ -39,6 +39,22 @@ export class ShippingMethodError extends CheckoutValidationError {
   }
 }
 
+export class UnsupportedDestinationError extends CheckoutValidationError {
+  constructor(country: string) {
+    super(`We cannot ship to ${country} with the available methods.`);
+    this.name = "UnsupportedDestinationError";
+  }
+}
+
+export class TotalChangedError extends CheckoutValidationError {
+  constructor(
+    message = "The order total changed since your preview. Please review and confirm the new total.",
+  ) {
+    super(message);
+    this.name = "TotalChangedError";
+  }
+}
+
 export class CouponInvalidError extends CheckoutValidationError {
   constructor(message: string) {
     super(message);

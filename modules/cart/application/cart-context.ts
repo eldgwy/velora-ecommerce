@@ -128,6 +128,8 @@ export interface CatalogEntry {
   effectivePrice: string;
   /** Total promotion saving per unit, in cents. */
   discountPerUnitCents: number;
+  /** Authoritative per-unit weight in grams, or null when unknown. */
+  weightGrams: number | null;
 }
 
 /**
@@ -189,6 +191,7 @@ export async function resolveCatalogEntry(
     promotion,
     effectivePrice: (effectiveCents / 100).toFixed(2),
     discountPerUnitCents: listCents - effectiveCents,
+    weightGrams: variant.weightGrams ?? null,
   };
 }
 

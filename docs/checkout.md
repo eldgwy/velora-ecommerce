@@ -1,125 +1,165 @@
 # VELORA — Checkout & Order Creation (FR-08 / FR-09)
 
-## Checkout validation
+## Sequential pipeline
 
-`placeOrder` revalidates every cart line against live data (`resolveCatalogEntry`):
-existence, variant + product `ACTIVE`, quantity within `[1, 99]`, availability,
-current list price, and the best active promotion. Any blocker aborts with
-`CartConflictError` carrying a structured snapshot — quantities are never
-silently reduced and totals never silently changed.
+Checkout runs seven strictly ordered stages; every stage is enforced
+server-side regardless of client validation, and each step gates on the
+previous one in the UI (the server is the authority in all cases):
 
-Price-change policy: the order always prices from the live catalog, never from
-`priceAtAddition`. If the cart changed between validation and creation, Tx1
-re-reads the cart and aborts (`CartConflictError`) instead of ordering stale
-lines. Promotion changes behave the same way: expired promotions simply drop
-out of the totals and the pre-checkout warning names them. Stock TOCTOU
-between validation and reservation is closed by the atomic reservation step;
-a loss there compensates (below) instead of overselling.
+1. **Cart integrity** — authenticated customer only (guest checkout remains
+   unsupported: `orders.user_id` is `NOT NULL`). The active cart is loaded
+   from the database, ownership verified, and every line revalidated
+   (existence, `ACTIVE` variant + product, quantity limits, live price, live
+   stock). Blockers abort with actionable `CartConflictError`. Nothing
+   client-supplied (prices, stock, discounts, totals) is trusted, and opening
+   checkout never reserves inventory.
+2. **Shipping address** — saved id (ownership verified against the customer
+   profile, missing and foreign ids answered identically per BR-008) or
+   Zod-validated inline input. Inline addresses are snapshotted, never saved
+   to the book (no duplicate records).
+3. **Billing address** — saved, inline, or `sameAsShipping`, in which case the
+   server derives billing from the already-validated shipping snapshot. The
+   flag alone is never trusted; the resolved destination is what persists.
+4. **Shipping method & rates** — method id only crosses the boundary; the
+   server quotes destination eligibility, weight limits (when weight is
+   known), and the fee schedule. See “Shipping configuration” below.
+5. **Tax, coupons, promotions** — coupon validated under a locked row in Tx1
+   (never consumed by previews); promotions adjust unit prices first (BR-009
+   stacking: promo → unit price, then at most one coupon on the discounted
+   merchandise subtotal — the schema and engine accept exactly one coupon
+   code, so double-couponing is structurally impossible).
+6. **Order review** — `previewCheckout` recalculates the full breakdown from
+   live data with zero side effects (no order, payment, reservation, or coupon
+   consumption). The UI renders this preview and echoes `totalCents` back.
+7. **Placement & payment** — `placeOrder` recomputes everything inside Tx1
+   and aborts with `TotalChangedError` (nothing persisted) when the echoed
+   total differs, forcing explicit reconfirmation against a fresh preview.
+   Stripe is initialized from the persisted authoritative total only.
 
-## Price and promotion calculation
+## Financial formulas and rounding
 
-- Unit price: variant `priceOverride`, else product `basePrice` (reused).
-- Best active promotion per product adjusts the unit price (reused schema,
-  no duplicated engine; `endsAt = NULL` is open-ended).
-- Coupon (`FR-12.02`, locked `FOR UPDATE` in Tx1): active, in-window, under
-  `usageLimit`, subtotal over `minimumOrderAmount`; `PERCENTAGE` capped by
-  `maximumDiscountAmount`, `FIXED` capped at subtotal. Usage is consumed in
-  Tx1 (`usageCount + 1`, `couponUsages` row) and rolled back on compensation.
-  Gap: the schema has no per-user limit column, so that SRS rule is unenforced.
-- Shipping (server-authoritative enum; no shipping table exists):
-  `STANDARD` 4.99 (free when discounted subtotal **strictly exceeds** 75.00,
-  BR-018), `EXPRESS` 12.99.
-- Tax: explicitly `0.00` — no jurisdiction rules exist; `TAX_RATE_BPS` is the
-  hook. Total follows BR-002 exactly, all in integer cents.
+All money math runs on exact decimal intermediates (`decimal.js`) and lands
+on integer minor units:
 
-## Order creation and snapshot semantics
+```text
+Subtotal       = Σ(quantityᵢ × unitPriceᵢ)          (exact integer sums)
+DiscountAmount = PromotionDiscount + CouponDiscount (coupon ≤ subtotal)
+TaxableBase    = Subtotal − DiscountAmount + TaxableShipping   (≥ 0)
+TaxAmount      = round_half_up(TaxableBase × TaxRate)
+TotalAmount    = Subtotal − DiscountAmount + ShippingAmount + TaxAmount
+```
 
-Tx1 (one transaction) inserts: order (`PENDING`/`PENDING`, `VEL-YYYYMMDD-XXXX`
-with collision retry, idempotency key + input hash), items (`PENDING`
-reservation, frozen name/sku/qty/unit/discount/total), both address snapshots
-(from verified saved addresses or validated inline input — inline addresses
-are never saved to the book), `PENDING` payment row, initial history, coupon
-usage — and flips the cart `ACTIVE → CONVERTED`.
+- `TaxableShipping` is the fee portion inside the base (0 unless the method
+  rule and the jurisdiction both tax shipping); `ShippingAmount` is the full
+  fee charged. Both are snapshotted separately.
+- Rounding policy: `ROUND_HALF_UP`, applied exactly once per computed
+  aggregate involving division (per-unit promotion prices, coupon discount,
+  tax). Line totals and subtotals are exact sums of minor-unit integers and
+  are never re-rounded. Engine version is frozen per order
+  (`pricing_policy_version`: `"1"` legacy rows, `"2"` decimal engine).
+- Stored amounts are aggregates as named (`subtotal`, `discount_amount`,
+  `shipping_amount`, `tax_amount`, `total_amount`; per-line `unit_price`,
+  `discount_amount`, `total_amount`); the Stripe charge amount is the
+  persisted `totalAmount` converted once to minor units — they agree exactly.
+- Historical rows are never repriced: old orders keep their frozen snapshot
+  (and policy `"1"`); corrections require an authorized workflow, not edits.
 
-## Inventory reservation transaction boundaries
+## Decimal implementation and currencies
 
-`reserveOrderInventory` owns its transaction and cannot nest, so the flow is
-explicitly **two-phase**, not one atomic transaction:
+- `decimal.js@10.6.0` (direct dependency) backs `modules/checkout/domain/money.ts`
+  (exact major↔minor conversion with overflow/NaN guards) and
+  `modules/checkout/domain/calculation.ts` (the deterministic, dependency-free
+  engine: no React, DB, or Stripe access).
+- Supported currencies: `USD` (2 minor units) only. Anything else is rejected
+  (`Unsupported currency`) instead of assuming 2 decimals; multi-minor-unit
+  support is a config addition, not a code change.
+- Bounds: every input must be a safe non-negative integer in minor units;
+  coupon ≤ subtotal, taxable shipping ≤ shipping, totals ≤ `MAX_SAFE_INTEGER`;
+  violations throw before any write.
 
-1. Tx1 creates the order graph (above).
-2. `reserveOrderInventory(orderId)` runs in its own transaction (reused as-is).
-3. On shortage: compensation reuses `cancelOrder` (releases, cancels,
-   histories) plus a tx that reactivates the cart (`CONVERTED → ACTIVE`) and
-   rolls back coupon usage. The failed order stays `CANCELLED` for audit; the
-   customer retries with a **fresh** key. Partial holds are impossible
-   (all-or-nothing check before mutation; PENDING items otherwise).
+## Coupon and promotion stacking policy (explicit)
 
-## Idempotency behavior
+1. Product promotions adjust the effective unit price first.
+2. At most one coupon applies, computed on the discounted merchandise
+   subtotal only — never on shipping or tax.
+3. The same promotion is applied once per line (best-active-promotion
+   resolution); coupon usage is locked (`FOR UPDATE`), consumed in Tx1, and
+   rolled back on compensation. Concurrent checkouts for the last usage
+   serialize: exactly one wins.
+4. Discounts can never drive the merchandise base negative (cap + engine guard).
 
-- Client sends one uuid key per attempt; `(user_id, idempotency_key)` is
-  unique. Same key + same input → same order returned (`replayed: true`).
-- Same key + different input → `409 IdempotencyConflictError` (hash-bound).
-- Concurrent same-key checkouts: one Tx1 wins; losers replay the winner (or
-  see `CART_CONSUMED` and replay on retry). Concurrent different-key
-  checkouts: cart conversion lets exactly one through.
-- Button disabling is UX only; correctness is server-side.
-- Stripe-side idempotency (`checkout-{orderId}`) prevents duplicate intents
-  on payment retries.
+Gap (unchanged): no per-user-limit column exists, so that SRS rule stays
+unenforced.
 
-## Payment initialization and webhook integration
+## Shipping configuration and rate computation
 
-Runs outside all inventory locks. `card`: creates (or retrieves) a Stripe
-PaymentIntent for the server total, stores it on the payment row — the same
-`providerPaymentId` the existing webhook route uses — and returns the client
-secret. `cod`: marks the row, no external call, `checkoutExpiresAt = NULL`
-so the expiry job (which only picks dated expiries) never auto-cancels COD;
-release follows admin fulfillment/cancellation. Without `STRIPE_SECRET_KEY`
-the order stands reserved and the client gets `configurationMissing` to retry
-later. Only verified webhooks move money state (`finalizeOrderPayment` /
-`handlePaymentFailureWebhook`, reused unchanged); late payments against
-cancelled/expired orders are rejected, never fulfilled.
+- Methods `STANDARD` (4.99, free when discounted subtotal strictly exceeds
+  75.00 per BR-018) and `EXPRESS` (12.99); adding a method is a code change.
+- `SHIPPING_RULES` adds per-method regions (`"*"` = worldwide; otherwise ISO
+  alpha-2 allowlist), optional `maxWeightGrams`, and a `taxable` flag.
+  Default rules serve all destinations with no weight limits — deliberately
+  permissive, fully restrictable without code changes elsewhere.
+- Weight comes from authoritative `product_variant.weight_grams` (nullable,
+  non-negative CHECK). Missing weight is a defined outcome: limits skipped,
+  surfaced in the preview (`weightKnown: false`), never guessed.
+- Unsupported destinations/methods fail closed (`UnsupportedDestinationError`
+  / `ShippingMethodError` → structured `SHIPPING_INVALID`, no silent fallback).
+- To enable live checkout with real policy: approve region allowlists, weight
+  limits, fees, and each method's taxability; backfill variant weights.
+  No carrier integration exists or is claimed.
 
-## Failure recovery and compensation
+## Tax jurisdiction configuration and open legal items
 
-| Event | Handling (all idempotent) |
-|---|---|
-| Reservation shortage | Compensate (cancel + reactivate cart + coupon rollback) → `409` + fresh key for retry |
-| Payment init failure | Order stays `PENDING` + reserved until TTL; `retryPayment` resumes idempotently |
-| Payment failure webhook | Release + `CANCELLED`/`FAILED` (reused) |
-| Reservation expiry | `handleCheckoutExpiration` → `CANCELLED`/`EXPIRED` (reused job) |
-| Late payment after cancel/expiry | `finalizeOrderPayment` throws; no fulfillment without reservation |
-| Customer cancel | `cancelOrderAction` (ownership-checked) → `cancelOrder` (reused) |
+- `TAX_JURISDICTIONS` is intentionally empty: with no approved table,
+  `resolveTaxRule` returns explicit `UNCONFIGURED` (0 bps) rather than an
+  invented legal rate. Checkout proceeds exactly as before, but the snapshot
+  (`tax_jurisdiction`, `tax_rate_bps`, `taxable_base`) and the UI record that
+  no jurisdiction applied.
+- Enabling tax: approve (country → rate bps, shipping taxability) rows and
+  append them; merchandise-vs-shipping distinction and exemptions then work
+  per jurisdiction. Until then, treating any destination as taxed is a
+  business/legal decision, not an engineering default — fail-safe is
+  proceed-at-zero with full visibility.
 
-## Order state transitions
+## Order snapshot semantics
 
-`PENDING → PROCESSING → SHIPPED → DELIVERED`, `PENDING → CANCELLED`
-(all reused; no new states). Payment: `PENDING → COMPLETED|FAILED`,
-COD stays `PENDING` until fulfillment. Reservations: `PENDING → RESERVED →
-COMMITTED|RELEASED`.
+Tx1 persists: lines (variant, qty, frozen unit/discount/total, `promotion_id`
+— plain reference, no FK so snapshots survive promotion deletion), order
+aggregates, `shipping_method`, `tax_jurisdiction`/`tax_rate_bps`/`taxable_base`,
+`pricingPolicyVersion`, both address snapshots, payment row, history row,
+coupon usage. Pre-policy rows keep NULLs (unknown, never fabricated).
 
-## Required environment variables
+## Price-change confirmation behavior
 
-None new. Reused: `RESERVATION_EXPIRY_MINUTES` (default 30),
-`STRIPE_SECRET_KEY` (card payments; absent = structured degradation),
-`STRIPE_WEBHOOK_SECRET` (existing route).
+Preview totals are displayed, never charged. Placement with a matching
+`expectedTotalCents` proceeds; any drift (price, stock, shipping, tax,
+promotions, coupon) aborts pre-commit with `TOTAL_CHANGED`, and the UI shows
+the fresh breakdown with an explicit confirm control that re-places against
+the latest preview. Idempotency keys are unchanged by confirmation (same
+inputs → same key → replay safe).
 
-## Deployment / migration requirements
+## Payment amount consistency
 
-- `0015_order_checkout_idempotency` — `idempotency_key` (backfilled random)
-  + `checkout_hash` + unique `(user_id, idempotency_key)`.
-- `0016_reconcile_declared_indexes` — creates declared-but-missing indexes;
-  removes synthetic `ORD-TEST-*` fixtures blocking two uniques and sweeps
-  orphaned child rows (this environment was provisioned without FKs/indexes).
-- Known drift (follow-up): the environment lacks most FK constraints declared
-  in migration 0000 (no cascades run here); a dedicated FK-reconciliation
-  migration is recommended. Test suites must keep fixture cleanup scoped —
-  unscoped deletes/row counts race across parallel workers in the shared DB.
-- Guest checkout is unsupported by design (`orders.user_id NOT NULL`);
-  checkout requires an authenticated session.
+Stripe `PaymentIntent.amount` is built from the persisted order total in
+minor units with order-scoped idempotency (`checkout-{orderId}`); retries
+retrieve rather than recreate. Webhook dedup + finalization unchanged.
 
-## Follow-up work
+## Migration and deployment requirements
 
-Per-user coupon limits (no schema column), regional tax, shipping-method
-table/carrier rates, Stripe Elements confirmation UI (client secret is
-returned; live confirmation needs publishable key + Elements), admin
-fulfillment flow for COD, FK reconciliation migration.
+- `0020_checkout_financial_snapshot` (additive, nullable; policy default
+  `"1"`; weight CHECK): `orders.{shipping_method, tax_jurisdiction,
+  tax_rate_bps, taxable_base, pricing_policy_version}`,
+  `order_items.promotion_id`, `product_variant.weight_grams`.
+- New dependency `decimal.js@10.6.0` (MIT, zero dependencies).
+- No env changes. No Stripe/API changes.
+
+## Known limitations and operational prerequisites
+
+- Single supported currency (USD); single coupon; no per-user coupon limits.
+- No approved shipping regions/fees beyond the documented defaults; variant
+  weights unpopulated (limits dormant).
+- No approved tax jurisdictions (explicit zero-rate fallback; needs legal sign-off).
+- Guest checkout unsupported; shared-DB parallel test runs can flake
+  unrelated suites (documented rerun discipline; scoped fixtures/cleanup).
+  The full suite is green serially and at bounded parallelism; on
+  memory-constrained machines prefer `pnpm vitest run --maxWorkers=2`.

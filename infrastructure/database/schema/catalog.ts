@@ -196,6 +196,10 @@ export const productVariants = pgTable(
 
     priceOverride: numeric("price_override"),
 
+    // Authoritative per-unit weight in grams for shipping. Nullable:
+    // unknown weight is a defined input (weight limits skipped), never 0.
+    weightGrams: integer("weight_grams"),
+
     seoTitle: text("seo_title"),
 
     seoDescription: text("seo_description"),
@@ -233,6 +237,8 @@ export const productVariants = pgTable(
     ),
 
     check("product_variant_price_override_positive", sql`${table.priceOverride} IS NULL OR ${table.priceOverride} > 0`),
+
+    check("product_variant_weight_non_negative", sql`${table.weightGrams} IS NULL OR ${table.weightGrams} >= 0`),
   ],
 );
 

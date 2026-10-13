@@ -76,6 +76,21 @@ export const orders = pgTable(
 
     notes: text("notes"),
 
+    // FR-08 immutable financial snapshot (migration 0020): everything needed
+    // to reproduce and explain the charged amount. NULL on pre-policy rows
+    // means "unknown", never a fabricated value.
+    shippingMethod: text("shipping_method"),
+
+    taxJurisdiction: text("tax_jurisdiction"),
+
+    taxRateBps: integer("tax_rate_bps"),
+
+    taxableBase: numeric("taxable_base"),
+
+    pricingPolicyVersion: text("pricing_policy_version")
+      .notNull()
+      .default("1"),
+
     createdAt: timestamp("created_at", {
       mode: "date",
     })
@@ -156,6 +171,10 @@ export const orderItems = pgTable(
     discountAmount: numeric("discount_amount"),
 
     totalAmount: numeric("total_amount"),
+
+    // Promotion applied to this line, if any. Deliberately no foreign key:
+    // promotions are deletable and the snapshot must survive them.
+    promotionId: uuid("promotion_id"),
 
     reservationStatus: orderReservationStatusEnum("reservation_status")
       .notNull()

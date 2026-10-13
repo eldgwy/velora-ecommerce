@@ -141,6 +141,13 @@
       "when": 1791900000006,
       "tag": "0019_notification_retry_state",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791900000007,
+      "tag": "0020_checkout_financial_snapshot",
+      "breakpoints": true
     }
   ]
 }
