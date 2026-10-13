@@ -5,9 +5,22 @@ vi.mock("@/infrastructure/database", async () => {
   return { db: testDb };
 });
 
-const { refundsCreateMock } = vi.hoisted(() => ({
-  refundsCreateMock: vi.fn(async () => ({ id: "re_test_1" })),
-}));
+const { refundsCreateMock } = vi.hoisted(() => {
+  const seen = new Map<string, { id: string }>();
+  let seq = 0;
+  return {
+    // Faithful Stripe stub: identical idempotency keys replay the SAME
+    // refund object instead of moving money twice.
+    refundsCreateMock: vi.fn(async (_params: unknown, opts?: { idempotencyKey?: string }) => {
+      const key = opts?.idempotencyKey ?? `nokey-${(seq += 1)}`;
+      const existing = seen.get(key);
+      if (existing) return existing;
+      const created = { id: `re_test_${Date.now()}_${(seq += 1)}` };
+      seen.set(key, created);
+      return created;
+    }),
+  };
+});
 
 vi.mock("stripe", () => ({
   default: vi.fn(function (this: unknown) {
@@ -138,8 +151,6 @@ afterAll(async () => {
 
 beforeEach(() => {
   refundsCreateMock.mockClear();
-  let refundSeq = 0;
-  refundsCreateMock.mockImplementation(async () => ({ id: `re_test_${Date.now()}_${(refundSeq += 1)}` }));
 });
 
 describe("refund workflow", () => {
@@ -235,6 +246,70 @@ describe("partial refunds and duplicates", () => {
     }
   });
 
+  it("converges an admin retry of the same amount onto the original refund", async () => {
+    // Same (payment, amount) after success: Stripe replays the identical
+    // refund object by idempotency key; locally we must converge, not
+    // double-count. Uses a fresh payment to isolate amounts.
+    const [orderR] = await testDb
+      .insert(orders)
+      .values({
+        orderNumber: `RF-RETRY-${SFX}`,
+        userId,
+        status: "PROCESSING",
+        subtotal: "30.00",
+        discountAmount: "0.00",
+        shippingAmount: "0.00",
+        taxAmount: "0.00",
+        totalAmount: "30.00",
+        currency: "USD",
+        paymentStatus: "PAID",
+      })
+      .returning();
+    const [payR] = await testDb
+      .insert(payments)
+      .values({
+        orderId: orderR.id,
+        provider: "stripe",
+        providerPaymentId: `pi_retry_${SFX}`,
+        amount: "30.00",
+        currency: "USD",
+        status: "COMPLETED",
+        paymentMethod: "CARD",
+      })
+      .returning();
+    try {
+      const first = await requestRefund({
+        orderId: orderR.id,
+        amountCents: 1000,
+        reason: "first",
+        actorId: "admin-1",
+      });
+      expect(first.supersededBy).toBeUndefined();
+
+      refundsCreateMock.mockClear();
+      const retry = await requestRefund({
+        orderId: orderR.id,
+        amountCents: 1000,
+        reason: "admin retried the same refund",
+        actorId: "admin-1",
+      });
+      // Converged: same provider refund, single COMPLETED counting.
+      expect(retry.supersededBy).toBe(first.refundId);
+      expect(retry.providerRefundId).toBe(first.providerRefundId);
+      const rows = await testDb
+        .select()
+        .from(refunds)
+        .where(and(eq(refunds.paymentId, payR.id), eq(refunds.status, "COMPLETED")));
+      const total = rows.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
+      expect(total).toBe(1000);
+      expect(refundsCreateMock).toHaveBeenCalledTimes(1); // Stripe replay, one money movement
+    } finally {
+      await testDb.delete(refunds).where(eq(refunds.paymentId, payR.id));
+      await testDb.delete(payments).where(eq(payments.id, payR.id));
+      await testDb.delete(orders).where(eq(orders.id, orderR.id));
+    }
+  });
+
   it("records Stripe failures without moving money or state", async () => {
     refundsCreateMock.mockRejectedValueOnce(new Error("card_declined-ish"));
     const [order3] = await testDb
@@ -275,6 +350,9 @@ describe("partial refunds and duplicates", () => {
       expect(failed).toBeDefined();
       const [order] = await testDb.select().from(orders).where(eq(orders.id, order3.id));
       expect(order!.paymentStatus).toBe("PAID");
+      // A fresh attempt after failure stages anew (FAILED rows never block).
+      const retry = await requestRefund({ orderId: order3.id, amountCents: 1000, reason: "retry", actorId: "a" });
+      expect(retry.status).toBe("COMPLETED");
     } finally {
       await testDb.delete(refunds).where(eq(refunds.paymentId, pay3.id));
       await testDb.delete(payments).where(eq(payments.id, pay3.id));

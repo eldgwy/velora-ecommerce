@@ -38,6 +38,12 @@ const envSchema = z.object({
   // Internal job scheduling
   CRON_SECRET: z.string().optional(),
 
+  // Notification retry worker (all optional; worker defaults apply when unset:
+  // batch 50, 5 attempts, 10-minute claim lease). Declared here so deployed
+  // environments fail closed on typos via unknown-key review, not silently.
+  NOTIFICATION_BATCH_SIZE: z.coerce.number().int().positive().optional(),
+  NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().positive().optional(),
+  NOTIFICATION_LEASE_MINUTES: z.coerce.number().int().positive().optional(),
   // Guest cart cookie integrity (FR-06). Required in production; dev/test
   // fall back to a non-secret placeholder via getGuestCartSecret().
   GUEST_CART_SECRET: z.string().optional(),

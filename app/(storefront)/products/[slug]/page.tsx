@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import { getProductBySlug, getProductReviews } from "@/services/catalog-public";
 import Link from "next/link";
 import VariantSelector from "@/shared/components/product/VariantSelector";
+import { WishlistToggle } from "@/modules/wishlist/presentation/components/WishlistToggle";
+import { getSavedProductIds } from "@/modules/wishlist/application/queries/wishlist";
+import { getCurrentSession } from "@/shared/lib/guards";
 import { formatPrice } from "@/shared/lib/utils";
 
 interface ProductPageProps {
@@ -36,6 +39,12 @@ async function ProductContent({ params }: ProductPageProps) {
 
   // Fetch reviews
   const reviewsResult = await getProductReviews(product.id);
+
+  // Wishlist state for the toggle (guests see unsaved; toggle prompts sign-in).
+  const session = await getCurrentSession();
+  const savedIds = session
+    ? await getSavedProductIds(session.user.id, [product.id])
+    : new Set<string>();
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -127,11 +136,12 @@ async function ProductContent({ params }: ProductPageProps) {
           {/* Add to Cart */}
           <div className="flex gap-4 pt-4 border-t">
             <button className="flex-1 btn btn-primary btn-lg">Add to Cart</button>
-            <button className="btn btn-outline btn-lg" aria-label="Add to wishlist">
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-            </button>
+            <WishlistToggle
+              productId={product.id}
+              productName={product.name}
+              initialSaved={savedIds.has(product.id)}
+              className="size-11 shrink-0 !rounded-lg"
+            />
           </div>
 
           {/* Product Options Info */}

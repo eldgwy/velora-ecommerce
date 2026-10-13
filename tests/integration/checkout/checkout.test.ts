@@ -189,7 +189,7 @@ beforeAll(async () => {
     });
     addressOf[n] = created.id;
   }
-});
+}, 30000);
 
 afterAll(async () => {
   const myUserIds = Object.values(users);

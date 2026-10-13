@@ -9,6 +9,11 @@
       "path": "/api/internal/jobs/deliver-low-stock-alerts",
       "schedule": "*/10 * * * *",
       "method": "POST"
+    },
+    {
+      "path": "/api/internal/jobs/notification-retry",
+      "schedule": "*/5 * * * *",
+      "method": "POST"
     }
   ]
 }

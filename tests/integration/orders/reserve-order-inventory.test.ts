@@ -1503,6 +1503,9 @@ describe("expired reservation worker", () => {
       .from(products)
       .limit(1);
 
+    // Create dedicated variants for expired reservation tests.
+    // Rerun-safe: an interrupted run can leave these SKUs behind, and the
+    // enforced sku unique would reject a blind re-insert. Reuse on conflict.
     const [expVariant1] = await testDb
       .insert(productVariants)
       .values({
@@ -1511,8 +1514,15 @@ describe("expired reservation worker", () => {
         status: "ACTIVE",
         priceOverride: "12.00",
       })
+      .onConflictDoNothing({ target: productVariants.sku })
       .returning();
-    expVariantId1 = expVariant1.id;
+    expVariantId1 =
+      expVariant1?.id ??
+      (await testDb
+        .select({ id: productVariants.id })
+        .from(productVariants)
+        .where(eq(productVariants.sku, "EXP-RES-VAR-001"))
+        .then((rows) => rows[0]!.id));
 
     const [expVariant2] = await testDb
       .insert(productVariants)
@@ -1522,8 +1532,15 @@ describe("expired reservation worker", () => {
         status: "ACTIVE",
         priceOverride: "15.00",
       })
+      .onConflictDoNothing({ target: productVariants.sku })
       .returning();
-    expVariantId2 = expVariant2.id;
+    expVariantId2 =
+      expVariant2?.id ??
+      (await testDb
+        .select({ id: productVariants.id })
+        .from(productVariants)
+        .where(eq(productVariants.sku, "EXP-RES-VAR-002"))
+        .then((rows) => rows[0]!.id));
 
     // Create inventory for expired reservation test variants
     const [expInv1] = await testDb
@@ -1661,13 +1678,18 @@ describe("expired reservation worker", () => {
   });
 
   afterAll(async () => {
-    // FK-safe order: payments restrict their orders.
+    // FK-safe order: payments restrict their orders, items restrict variants.
     await testDb.delete(payments).where(eq(payments.id, expiredPaymentId));
     await testDb.delete(orderItems).where(eq(orderItems.orderId, expiredOrderId));
     await testDb.delete(orders).where(eq(orders.id, expiredOrderId));
     await testDb.delete(payments).where(eq(payments.id, validPaymentId));
     await testDb.delete(orderItems).where(eq(orderItems.orderId, validOrderId));
     await testDb.delete(orders).where(eq(orders.id, validOrderId));
+    // Clear any remaining item references to the dedicated variants before
+    // removing them (per-test leftovers from failed assertions).
+    await testDb.delete(orderItems).where(
+      inArray(orderItems.variantId, [expVariantId1, expVariantId2]),
+    );
     await testDb.delete(inventory).where(eq(inventory.id, expInventoryId1));
     await testDb.delete(inventory).where(eq(inventory.id, expInventoryId2));
     await testDb.delete(productVariants).where(eq(productVariants.id, expVariantId1));

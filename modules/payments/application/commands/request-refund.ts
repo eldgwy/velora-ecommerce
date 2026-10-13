@@ -29,6 +29,10 @@ export interface RefundResult {
   amountCents: number;
   status: "COMPLETED" | "PENDING";
   providerRefundId: string | null;
+  /** Set when this request converged onto an already-recorded refund
+   *  instead of completing its own row (Stripe replay or webhook reconcile
+   *  covered the same money first). */
+  supersededBy?: string;
 }
 
 function stripeClient(): Stripe | null {
@@ -194,8 +198,66 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
     );
   }
 
-  // TxB: record success, recompute capped status, audit.
-  await db.transaction(async (tx) => {
+  // TxB: record success, recompute capped status, audit — converging
+  // instead of double-counting when Stripe replayed an earlier refund
+  // (same idempotency key) or a webhook reconcile already recorded this
+  // money while our Stripe call was in flight.
+  const txb = await db.transaction(async (tx) => {
+    const [sameProvider] = await tx
+      .select({ id: refunds.id, amount: refunds.amount })
+      .from(refunds)
+      .where(
+        and(
+          eq(refunds.paymentId, staged.payment.paymentId),
+          eq(refunds.providerRefundId, stripeRefund.id),
+        ),
+      );
+    if (sameProvider && sameProvider.id !== staged.refundId) {
+      await tx
+        .update(refunds)
+        .set({
+          status: "CANCELLED",
+          reason: `Superseded by ${sameProvider.id} (provider ${stripeRefund.id} replayed)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(refunds.id, staged.refundId));
+      return { convergedTo: sameProvider.id, providerRefundId: stripeRefund.id };
+    }
+
+    const others = await tx
+      .select({ amount: refunds.amount })
+      .from(refunds)
+      .where(
+        and(
+          eq(refunds.paymentId, staged.payment.paymentId),
+          eq(refunds.status, "COMPLETED"),
+        ),
+      );
+    const otherCents = others.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
+    const capturedCents = Math.round(Number(staged.payment.amount) * 100);
+    if (otherCents + staged.amountCents > capturedCents) {
+      // A reconcile row covered our amount mid-flight: our row would
+      // double-count locally (Stripe moved money once). Cancel ours.
+      const [covering] = await tx
+        .select({ id: refunds.id })
+        .from(refunds)
+        .where(
+          and(
+            eq(refunds.paymentId, staged.payment.paymentId),
+            eq(refunds.status, "COMPLETED"),
+          ),
+        );
+      await tx
+        .update(refunds)
+        .set({
+          status: "CANCELLED",
+          reason: `Superseded: amount already recorded${covering ? ` in ${covering.id}` : ""}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(refunds.id, staged.refundId));
+      return { convergedTo: covering?.id ?? null, providerRefundId: stripeRefund.id };
+    }
+
     await tx
       .update(refunds)
       .set({
@@ -212,7 +274,6 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
         and(eq(refunds.paymentId, staged.payment.paymentId), eq(refunds.status, "COMPLETED")),
       );
     const totalCents = all.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
-    const capturedCents = Math.round(Number(staged.payment.amount) * 100);
     await tx
       .update(orders)
       .set({
@@ -235,7 +296,20 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       correlationId: staged.refundId,
       note: `Refund ${(staged.amountCents / 100).toFixed(2)} issued (${stripeRefund.id})`,
     });
+    return { convergedTo: null as string | null, providerRefundId: stripeRefund.id };
   });
+
+  if (txb.convergedTo) {
+    return {
+      refundId: txb.convergedTo,
+      orderId: request.orderId,
+      paymentId: staged.payment.paymentId,
+      amountCents: staged.amountCents,
+      status: "COMPLETED",
+      providerRefundId: txb.providerRefundId,
+      supersededBy: txb.convergedTo,
+    };
+  }
 
   return {
     refundId: staged.refundId,

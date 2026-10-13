@@ -82,7 +82,13 @@ describe("Cron Job Endpoints - Auth Logic", { timeout: 15000 }, () => {
         headers: { authorization: "Bearer test-cron-secret" },
       });
 
-      const response = await handleExpiredReservationsRequest(request);
+      // Bound execution: this test pins auth + response shape, not job
+      // semantics (a live run would consume other suites' expired fixtures
+      // in the shared test database). Worker behavior has dedicated tests.
+      const response = await handleExpiredReservationsRequest(request, {
+        batchSize: 0,
+        maxRetries: 0,
+      });
       expect(response.status).toBe(200);
       const body = await response.json();
       expect(body).toHaveProperty("processed");

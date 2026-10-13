@@ -1,6 +1,9 @@
 import { Metadata } from "next";
 import { searchProducts, getActiveBrands, getCategoryTree } from "@/services/catalog-public";
 import Link from "next/link";
+import { getCurrentSession } from "@/shared/lib/guards";
+import { getSavedProductIds } from "@/modules/wishlist/application/queries/wishlist";
+import { WishlistToggle } from "@/modules/wishlist/presentation/components/WishlistToggle";
 
 interface ProductsPageProps {
   searchParams: Promise<{
@@ -43,6 +46,15 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
     getActiveBrands(),
     getCategoryTree(true),
   ]);
+
+  // One batched membership query for the whole grid (no per-card queries).
+  const session = await getCurrentSession();
+  const savedIds = session
+    ? await getSavedProductIds(
+        session.user.id,
+        productsResult.items.map((p) => p.id),
+      )
+    : new Set<string>();
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -202,7 +214,11 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {productsResult.items.map((product) => (
-                <ProductCard key={product.id} product={product} />
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  initialSaved={savedIds.has(product.id)}
+                />
               ))}
             </div>
           )}
@@ -268,40 +284,54 @@ function CategoryFilterLink({
   );
 }
 
-function ProductCard({ product }: { product: Awaited<ReturnType<typeof searchProducts>>["items"][0] }) {
+function ProductCard({
+  product,
+  initialSaved,
+}: {
+  product: Awaited<ReturnType<typeof searchProducts>>["items"][0];
+  initialSaved: boolean;
+}) {
   return (
-    <Link href={`/products/${product.slug}`} className="group block">
-      <div className="aspect-square relative overflow-hidden rounded-lg bg-muted">
-        {product.primaryImage ? (
-          <img
-            src={product.primaryImage.url}
-            alt={product.primaryImage.alt ?? product.name}
-            className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground">No Image</div>
-        )}
-        {product.averageRating && product.reviewCount > 0 && (
-          <div className="absolute top-2 right-2 flex items-center gap-1 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-full text-xs font-medium">
-            <span className="text-amber-500">★</span>
-            <span>{product.averageRating.toFixed(1)}</span>
-            <span className="text-muted-foreground">({product.reviewCount})</span>
-          </div>
-        )}
-      </div>
-      <div className="mt-3 space-y-1">
-        <h3 className="font-medium line-clamp-1 group-hover:text-primary transition-colors">{product.name}</h3>
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold">{formatPrice(product.minVariantPrice ?? product.basePrice)}</span>
-          {product.comparePrice && Number(product.comparePrice) > Number(product.basePrice) && (
-            <span className="text-sm line-through text-muted-foreground">{formatPrice(product.comparePrice)}</span>
+    <div className="group relative">
+      <Link href={`/products/${product.slug}`} className="block">
+        <div className="aspect-square relative overflow-hidden rounded-lg bg-muted">
+          {product.primaryImage ? (
+            <img
+              src={product.primaryImage.url}
+              alt={product.primaryImage.alt ?? product.name}
+              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground">No Image</div>
+          )}
+          {product.averageRating && product.reviewCount > 0 && (
+            <div className="absolute top-2 right-2 flex items-center gap-1 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-full text-xs font-medium">
+              <span className="text-amber-500">★</span>
+              <span>{product.averageRating.toFixed(1)}</span>
+              <span className="text-muted-foreground">({product.reviewCount})</span>
+            </div>
           )}
         </div>
-        {product.brand && (
-          <span className="text-xs text-muted-foreground">{product.brand.name}</span>
-        )}
-      </div>
-    </Link>
+        <div className="mt-3 space-y-1">
+          <h3 className="font-medium line-clamp-1 group-hover:text-primary transition-colors">{product.name}</h3>
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-semibold">{formatPrice(product.minVariantPrice ?? product.basePrice)}</span>
+            {product.comparePrice && Number(product.comparePrice) > Number(product.basePrice) && (
+              <span className="text-sm line-through text-muted-foreground">{formatPrice(product.comparePrice)}</span>
+            )}
+          </div>
+          {product.brand && (
+            <span className="text-xs text-muted-foreground">{product.brand.name}</span>
+          )}
+        </div>
+      </Link>
+      <WishlistToggle
+        productId={product.id}
+        productName={product.name}
+        initialSaved={initialSaved}
+        className="absolute left-2 top-2"
+      />
+    </div>
   );
 }
 
