@@ -6,6 +6,9 @@ import { Separator } from "@/shared/components/ui/separator";
 import { formatPrice } from "@/shared/lib/utils";
 import { formatDate } from "@/shared/lib/format";
 import { getAdminOrderDetailsAction } from "@/modules/orders/presentation/actions/admin-order.actions";
+import { getRefundSummaryAction } from "@/modules/payments/presentation/actions/refund.actions";
+import { getOrderReturnsAction } from "@/modules/returns/presentation/actions/return.actions";
+import { AdminReturnControls } from "@/modules/returns/presentation/components/admin-return-controls";
 import { OrderStatusBadge } from "@/modules/orders/presentation/components/order-status-badge";
 import { AdminOrderControls } from "@/modules/orders/presentation/components/admin-order-controls";
 
@@ -35,6 +38,12 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
 
   const order = res.data;
   const shipping = order.addresses.find((a) => a.type === "SHIPPING");
+  const [refundSummaryRes, returnsRes] = await Promise.all([
+    getRefundSummaryAction(id),
+    getOrderReturnsAction(id),
+  ]);
+  const refundSummary = refundSummaryRes.ok ? (refundSummaryRes.data ?? null) : null;
+  const returnCases = returnsRes.ok ? (returnsRes.data ?? []) : [];
 
   return (
     <div className="flex flex-col gap-5">
@@ -138,6 +147,20 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
               status={order.status}
               paymentStatus={order.paymentStatus}
               paymentMethod={order.paymentMethod}
+            />
+          </section>
+          <section className="rounded-xl bg-white p-5 ring-1 ring-foreground/10" aria-label="Refunds and returns">
+            <h2 className="mb-3 text-base font-semibold">Refunds & returns</h2>
+            <AdminReturnControls
+              orderId={order.id}
+              orderLines={order.items.map((item) => ({
+                id: item.id,
+                productName: item.productName ?? null,
+                sku: item.sku,
+                quantity: item.quantity,
+              }))}
+              cases={returnCases}
+              refundSummary={refundSummary}
             />
           </section>
           <section className="rounded-xl bg-white p-5 text-sm ring-1 ring-foreground/10" aria-label="Delivery">

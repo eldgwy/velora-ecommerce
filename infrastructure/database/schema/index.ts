@@ -18,6 +18,8 @@ export * from "./wishlist";
 
 export * from "./orders";
 
+export * from "./returns";
+
 export * from "./reviews";
 
 export * from "./discounts";

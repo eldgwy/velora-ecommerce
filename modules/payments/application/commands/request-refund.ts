@@ -2,7 +2,11 @@ import { and, eq, sql } from "drizzle-orm";
 import Stripe from "stripe";
 
 import { db } from "@/infrastructure/database";
-import { toMinorUnits, fromMinorUnits } from "@/modules/checkout/domain/money";
+import {
+  isSupportedCurrency,
+  toMinorUnits,
+  fromMinorUnits,
+} from "@/modules/checkout/domain/money";
 import {
   orders,
   orderStatusHistories,
@@ -13,6 +17,7 @@ import {
   OrderNotFoundError,
   InvalidOrderTransitionError,
 } from "@/modules/orders/domain/errors/order-errors";
+import { logger } from "@/shared/lib/logging/logger";
 
 export interface RefundRequest {
   orderId: string;
@@ -47,17 +52,73 @@ function sanitizeStripeMessage(message: string): string {
 }
 
 /**
+ * A PENDING refund row older than this without reaching COMPLETED/FAILED is
+ * treated as abandoned (the process crashed between staging and the Stripe
+ * call, or the outcome was never reconciled). It no longer reserves cap and
+ * no longer blocks an identical restage — the restage reuses the same
+ * deterministic Stripe idempotency key, so a zombie Stripe call that is
+ * still alive converges in TxB instead of double-spending.
+ */
+export const STALE_PENDING_MS = 15 * 60_000;
+
+function isFreshPending(createdAt: Date | null, now: number): boolean {
+  if (!createdAt) return true;
+  return now - createdAt.getTime() < STALE_PENDING_MS;
+}
+
+/**
+ * True when the gateway outcome is ambiguous: the refund may have succeeded
+ * server-side despite the local error (timeouts, dropped connections, rate
+ * limits, provider 5xx). Such outcomes must NOT be recorded as FAILED —
+ * FAILED is terminal and a retry would stage fresh money. The PENDING row is
+ * left in place so a retry follows it (twin-follow) or restages against the
+ * same idempotency key, and `charge.refunded` reconciliation converges the
+ * records if Stripe did move the money.
+ */
+function isAmbiguousGatewayError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as {
+    type?: unknown;
+    code?: unknown;
+    statusCode?: unknown;
+  };
+  if (
+    candidate.type === "StripeConnectionError" ||
+    candidate.type === "StripeRateLimitError"
+  ) {
+    return true;
+  }
+  if (typeof candidate.statusCode === "number") {
+    if (candidate.statusCode === 429 || candidate.statusCode >= 500) return true;
+  }
+  const code = typeof candidate.code === "string" ? candidate.code : "";
+  return /^(ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|UND_ERR_|FETCH_ERROR)/.test(
+    code,
+  );
+}
+
+/**
  * Minimal admin refund workflow (SRS FR-11, BR-007).
  *
  * - Only against a COMPLETED payment; cumulative COMPLETED refunds never
  *   exceed the captured amount (checked under a payment-row lock, so
  *   concurrent requests cannot overshoot).
- * - Duplicate requests: an identical PENDING row (same payment + amount) is
- *   returned instead of duplicated; the Stripe call carries a deterministic
- *   idempotency key (`refund-{paymentId}-{amountCents}`), so even a race
- *   that slips past the local check settles to one Stripe refund.
- * - Stripe runs OUTSIDE every database transaction. PENDING → COMPLETED /
- *   FAILED transitions happen in short follow-up transactions.
+ * - The cap additionally reserves fresh PENDING rows: concurrent
+ *   different-amount requests serialize on the same lock and each sees the
+ *   others' in-flight reservations, so their sum can never exceed the
+ *   captured amount at Stripe either. Stale PENDING rows (older than
+ *   STALE_PENDING_MS, never reconciled) are treated as abandoned and free
+ *   their reservation — a restage reuses the same idempotency key.
+ * - Duplicate requests: an identical fresh PENDING row (same payment +
+ *   amount) is returned instead of duplicated; the Stripe call carries a
+ *   deterministic idempotency key (`refund-{paymentId}-{amountCents}`), so
+ *   even a race that slips past the local check settles to one Stripe refund.
+ * - Stripe runs OUTSIDE every database transaction. Deterministic rejections
+ *   move PENDING → FAILED; ambiguous outcomes (timeout, connection loss,
+ *   rate limit, provider 5xx) keep PENDING and surface a retryable error so
+ *   the next attempt follows or safely replays the same gateway operation.
+ * - PENDING → COMPLETED / FAILED / CANCELLED transitions happen in short
+ *   follow-up transactions.
  * - Inventory is NEVER restocked by a refund. Returned goods re-enter stock
  *   only through the verified-return path (`restockReturn`), which is a
  *   separate, explicitly authorized step.
@@ -111,7 +172,14 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       );
     }
 
-    const capturedCents = toMinorUnits(payment.amount ?? "0", payment.currency ?? "USD");
+    const currency = payment.currency ?? "USD";
+    if (!isSupportedCurrency(currency)) {
+      throw new InvalidOrderTransitionError(
+        "Refunds are not supported for this payment currency.",
+      );
+    }
+
+    const capturedCents = toMinorUnits(payment.amount ?? "0", currency);
     const prior = await tx
       .select({ amount: refunds.amount })
       .from(refunds)
@@ -119,10 +187,56 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
         and(eq(refunds.paymentId, payment.paymentId), eq(refunds.status, "COMPLETED")),
       );
     const refundedCents = prior.reduce(
-      (s, r) => s + toMinorUnits(r.amount ?? "0", payment.currency ?? "USD"),
+      (s, r) => s + toMinorUnits(r.amount ?? "0", currency),
       0,
     );
-    const remaining = capturedCents - refundedCents;
+    // Reserve in-flight money too: fresh PENDING rows are reservations made
+    // by concurrent requests holding (or that held) the same lock. Without
+    // this, two different-amount refunds could both stage and both succeed
+    // at Stripe before either TxB runs. Stale PENDING rows are abandoned
+    // (crashed stager) and free their reservation.
+    const now = Date.now();
+    const inFlight = await tx
+      .select({ amount: refunds.amount, createdAt: refunds.createdAt })
+      .from(refunds)
+      .where(
+        and(eq(refunds.paymentId, payment.paymentId), eq(refunds.status, "PENDING")),
+      );
+    const reservedCents = inFlight.reduce(
+      (s, r) =>
+        s + (isFreshPending(r.createdAt, now) ? toMinorUnits(r.amount ?? "0", currency) : 0),
+      0,
+    );
+
+    // Idempotent replay of a fresh in-flight identical request, checked
+    // before the cap: the twin already proved this amount fits under the
+    // same lock, and following it (rather than rejecting against its own
+    // reservation) is what keeps identical concurrent retries onto one
+    // gateway call. Stale identical rows are ignored so the caller stages
+    // anew (same Stripe idempotency key — a zombie gateway call converges
+    // in TxB).
+    if (request.amountCents !== undefined) {
+      if (!Number.isInteger(request.amountCents) || request.amountCents <= 0) {
+        throw new InvalidOrderTransitionError(
+          "Refund amount must be a positive integer of minor units.",
+        );
+      }
+      const [pending] = await tx
+        .select({ id: refunds.id, createdAt: refunds.createdAt })
+        .from(refunds)
+        .where(
+          and(
+            eq(refunds.paymentId, payment.paymentId),
+            eq(refunds.status, "PENDING"),
+            eq(refunds.amount, fromMinorUnits(request.amountCents, currency)),
+          ),
+        );
+      if (pending && isFreshPending(pending.createdAt, now)) {
+        return { refundId: pending.id, amountCents: request.amountCents, replayed: true as const, payment };
+      }
+    }
+
+    const remaining = capturedCents - refundedCents - reservedCents;
     if (remaining <= 0) {
       throw new InvalidOrderTransitionError("Nothing remains refundable on this payment.");
     }
@@ -134,26 +248,11 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       );
     }
 
-    // Idempotent replay of an in-flight identical request.
-    const [pending] = await tx
-      .select({ id: refunds.id })
-      .from(refunds)
-      .where(
-        and(
-          eq(refunds.paymentId, payment.paymentId),
-          eq(refunds.status, "PENDING"),
-          eq(refunds.amount, fromMinorUnits(amountCents, payment.currency ?? "USD")),
-        ),
-      );
-    if (pending) {
-      return { refundId: pending.id, amountCents, replayed: true as const, payment };
-    }
-
     const [created] = await tx
       .insert(refunds)
       .values({
         paymentId: payment.paymentId,
-        amount: fromMinorUnits(amountCents, payment.currency ?? "USD"),
+        amount: fromMinorUnits(amountCents, currency),
         reason: request.reason.trim().slice(0, 500),
         status: "PENDING",
       })
@@ -162,10 +261,20 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
     return { refundId: created.id, amountCents, replayed: false as const, payment };
   });
 
-  // A twin owns this attempt (identical PENDING row): never mint a second
-  // Stripe refund. Wait briefly for the twin's outcome instead.
+  // A twin owns this attempt (identical fresh PENDING row): follow it
+  // briefly — the twin usually completes in milliseconds. If the twin is
+  // gone (e.g. its Stripe call hit an ambiguous outcome and it returned),
+  // adopt the row below and drive the gateway call ourselves against the
+  // same deterministic idempotency key: Stripe replays the same refund
+  // object and TxB converges instead of double-spending.
   if (staged.replayed) {
-    return await awaitTwinRefund(staged.refundId, request.orderId, staged.payment.paymentId, staged.amountCents);
+    const followed = await awaitTwinRefund(
+      staged.refundId,
+      request.orderId,
+      staged.payment.paymentId,
+      staged.amountCents,
+    );
+    if (followed) return followed;
   }
 
   // Stripe call outside the transaction.
@@ -181,6 +290,24 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       { idempotencyKey: `refund-${staged.payment.paymentId}-${staged.amountCents}` },
     );
   } catch (error) {
+    if (isAmbiguousGatewayError(error)) {
+      // The gateway never confirmed the outcome: Stripe may have recorded
+      // the refund despite the local error. FAILED is terminal and would
+      // wrongly free the next attempt to move the same money twice, so the
+      // PENDING reservation is kept. Retrying is safe (same idempotency key;
+      // twin-follow converges), and `charge.refunded` reconciliation records
+      // the money if Stripe did move it. Point the operator at both.
+      logger.error("Refund gateway outcome ambiguous, kept pending for retry", {
+        module: "payments",
+        action: "requestRefundAmbiguous",
+        orderId: request.orderId,
+        paymentId: staged.payment.paymentId,
+        refundId: staged.refundId,
+      });
+      throw new InvalidOrderTransitionError(
+        "The payment provider did not confirm the refund (timeout or temporary error). No local record was finalized — retry the same refund; if the provider did move the money, reconciliation will converge instead of duplicating it.",
+      );
+    }
     await db.transaction(async (tx) => {
       await tx
         .update(refunds)
@@ -351,17 +478,18 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
 /**
  * Follow a twin-owned refund attempt to its conclusion without issuing a
  * second Stripe call. Polls briefly (the twin completes in milliseconds);
- * on timeout returns the PENDING row so the caller can retry later, and on
- * twin failure surfaces a retryable error (the FAILED row stays terminal,
- * the next attempt stages fresh).
+ * on twin failure surfaces a retryable error (the FAILED row stays terminal,
+ * the next attempt stages fresh). Returns null when the twin neither
+ * completed nor failed in time — the caller then adopts the row and drives
+ * the gateway call itself under the same idempotency key.
  */
 async function awaitTwinRefund(
   refundId: string,
   orderId: string,
   paymentId: string,
   amountCents: number,
-  deadlineMs = 10_000,
-): Promise<RefundResult> {
+  deadlineMs = 2_000,
+): Promise<RefundResult | null> {
   const started = Date.now();
   for (;;) {
     const [row] = await db
@@ -385,14 +513,7 @@ async function awaitTwinRefund(
       );
     }
     if (Date.now() - started > deadlineMs) {
-      return {
-        refundId,
-        orderId,
-        paymentId,
-        amountCents,
-        status: "PENDING",
-        providerRefundId: null,
-      };
+      return null;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }

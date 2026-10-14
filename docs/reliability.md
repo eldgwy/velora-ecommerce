@@ -55,6 +55,14 @@ Implemented minimal admin workflow (`modules/payments/.../request-refund.ts`):
   to match the table's unique key.
 - Inventory: NEVER restocked by refunds (explicit rule, also in the customer
   email). Verified returns use `restockReturn` as a separate authorized step.
+- Cap reserves fresh PENDING rows (concurrent different-amount requests
+  cannot overshoot); stale PENDING (>15 min) is treated as abandoned.
+  Ambiguous gateway outcomes (timeout/connection/5xx/429) keep PENDING with
+  a retryable error and converge via idempotency-key adoption or webhook
+  reconcile — never recorded FAILED. See `docs/returns.md`.
+- Returns & restocking: separate `return_cases` / `return_items` lifecycle
+  (migration 0021), inspection-gated, exactly-once RETURN movements with
+  DB-enforced idempotency. Full detail in `docs/returns.md`.
 - Blockers remaining: live `STRIPE_SECRET_KEY` required (calls blocked
   without it — safe default); no return-merchandise flow; no partial-capture
   handling (full-capture model only).

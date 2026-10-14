@@ -6,10 +6,15 @@ import { requireAdmin } from "@/shared/lib/guards";
 import { logger } from "@/shared/lib/logging/logger";
 import type { ActionResult } from "@/shared/types/actions";
 import { requestRefund } from "@/modules/payments/application/commands/request-refund";
+import {
+  getRefundSummary,
+  type RefundSummary,
+} from "@/modules/payments/application/queries/refund-summary";
 import { fromMinorUnits, toMinorUnits } from "@/modules/checkout/domain/money";
 import { dispatchOrderNotification } from "@/modules/notifications/application/order-emails";
 import { InvalidOrderTransitionError } from "@/modules/orders/domain/errors/order-errors";
 import { OrderNotFoundError } from "@/modules/orders/domain/errors/order-errors";
+import { orderIdSchema } from "@/modules/orders/presentation/schemas/order.schema";
 
 const refundSchema = z.object({
   orderId: z.string().uuid("Invalid order identifier."),
@@ -74,4 +79,19 @@ export async function requestRefundAction(
     });
     return { ok: false, error: "The refund could not be completed." };
   }
+}
+
+/**
+ * Captured / refunded / remaining totals plus the refund ledger for the
+ * admin order view. Read-only; secrets are never included (provider refund
+ * ids are opaque references, safe to display).
+ */
+export async function getRefundSummaryAction(
+  input: unknown,
+): Promise<ActionResult<RefundSummary | null>> {
+  await requireAdmin();
+  const parsed = orderIdSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid order." };
+  const summary = await getRefundSummary(parsed.data);
+  return { ok: true, data: summary };
 }

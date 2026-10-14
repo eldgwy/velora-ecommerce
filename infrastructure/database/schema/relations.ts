@@ -21,6 +21,7 @@ import {
   payments,
   refunds,
 } from "./orders";
+import { returnCases, returnItems } from "./returns";
 import { reviews, reviewImages } from "./reviews";
 import {
   coupons,
@@ -334,6 +335,8 @@ export const ordersRelations = relations(
     payments: many(payments),
 
     couponUsages: many(couponUsages),
+
+    returnCases: many(returnCases),
   }),
 );
 
@@ -507,3 +510,43 @@ export const collectionProductsRelations =
       }),
     }),
   );
+/* ============================================================
+   RETURNS (physical goods — separate from monetary refunds)
+============================================================ */
+
+export const returnCasesRelations = relations(
+  returnCases,
+  ({ one, many }) => ({
+    order: one(orders, {
+      fields: [returnCases.orderId],
+      references: [orders.id],
+    }),
+
+    refund: one(refunds, {
+      fields: [returnCases.refundId],
+      references: [refunds.id],
+    }),
+
+    items: many(returnItems),
+  }),
+);
+
+export const returnItemsRelations = relations(
+  returnItems,
+  ({ one }) => ({
+    returnCase: one(returnCases, {
+      fields: [returnItems.caseId],
+      references: [returnCases.id],
+    }),
+
+    orderItem: one(orderItems, {
+      fields: [returnItems.orderItemId],
+      references: [orderItems.id],
+    }),
+
+    variant: one(productVariants, {
+      fields: [returnItems.variantId],
+      references: [productVariants.id],
+    }),
+  }),
+);
