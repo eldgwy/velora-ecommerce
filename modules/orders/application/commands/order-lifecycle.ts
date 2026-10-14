@@ -12,6 +12,7 @@ import {
 } from "@/modules/orders/domain/errors/order-errors";
 import type { OrderActor, OrderStatus as LifecycleStatus } from "@/modules/orders/domain/rules/order-transitions";
 import { releaseOrderReservation } from "./reserve-order-inventory";
+import { releaseCouponUsageForOrder } from "@/modules/checkout/application/coupon";
 
 export type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 export type OrderPaymentStatus = (typeof orderPaymentStatusEnum.enumValues)[number];
@@ -143,6 +144,10 @@ export async function cancelOrder(
       })
       .where(eq(orders.id, orderId));
 
+    // The order will never be paid: free its coupon capacity in the same
+    // transaction (idempotent — rows already gone mean nothing decremented).
+    await releaseCouponUsageForOrder(tx, orderId);
+
     await recordStatusHistory(tx, orderId, "CANCELLED", options.reason ?? "Order cancelled", {
       previousStatus: order.status,
       eventType: options.eventType ?? "cancelled",
@@ -239,6 +244,10 @@ export async function handlePaymentFailure(
       })
       .where(eq(orders.id, orderId));
 
+    // Failed payment: the coupon capacity held since order creation is
+    // freed atomically with the failure transition (idempotent).
+    await releaseCouponUsageForOrder(tx, orderId);
+
     await recordStatusHistory(tx, orderId, newOrderStatus, options.reason ?? "Payment failed", {
       previousStatus: order.status,
       eventType: options.eventType ?? "payment_failed",
@@ -320,6 +329,9 @@ export async function handleCheckoutExpiration(
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
+
+    // Expired checkout: freed atomically with the expiry transition.
+    await releaseCouponUsageForOrder(tx, orderId);
 
     await recordStatusHistory(tx, orderId, "CANCELLED", options.reason ?? "Checkout expired", {
       previousStatus: order.status,

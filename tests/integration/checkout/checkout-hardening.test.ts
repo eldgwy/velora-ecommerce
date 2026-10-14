@@ -19,9 +19,9 @@ vi.mock("@/modules/checkout/application/coupon", async (importOriginal) => {
     await importOriginal<typeof import("@/modules/checkout/application/coupon")>();
   return {
     ...actual,
-    validateCouponForCheckout: async (tx: unknown, code: string, subtotal: number) => {
+    validateCouponForCheckout: async (tx: unknown, code: string, subtotal: number, userId: string) => {
       if (couponStubs.impl) return couponStubs.impl(tx, code, subtotal);
-      return actual.validateCouponForCheckout(tx as never, code, subtotal);
+      return actual.validateCouponForCheckout(tx as never, code, subtotal, userId);
     },
   };
 });

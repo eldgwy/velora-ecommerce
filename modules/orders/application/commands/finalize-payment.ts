@@ -5,6 +5,7 @@ import { inventory, inventoryMovements } from "@/infrastructure/database/schema/
 import { orderItems, orders, orderStatusHistories, payments, webhookEvents } from "@/infrastructure/database/schema/orders";
 import { orderPaymentStatusEnum, orderReservationStatusEnum, orderStatusEnum, paymentStatusEnum } from "@/infrastructure/database/schema/enums";
 import { toMinorUnits } from "@/modules/checkout/domain/money";
+import { releaseCouponUsageForOrder } from "@/modules/checkout/application/coupon";
 import { logger } from "@/shared/lib/logging/logger";
 import {
   OrderNotFoundError,
@@ -586,6 +587,10 @@ export async function handlePaymentFailureWebhook(
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId));
+
+    // Failed payment: free the coupon capacity held since order creation,
+    // atomically with the failure transition (idempotent on redelivery).
+    await releaseCouponUsageForOrder(tx, orderId);
 
     await tx.insert(orderStatusHistories).values({
       orderId,

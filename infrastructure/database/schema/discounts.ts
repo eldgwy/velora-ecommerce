@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   index,
   integer,
   numeric,
@@ -9,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import {
   couponTypeEnum,
@@ -41,6 +43,8 @@ export const coupons = pgTable(
     ),
 
     usageLimit: integer("usage_limit"),
+
+    perUserLimit: integer("per_user_limit"),
 
     usageCount: integer("usage_count")
       .notNull()
@@ -83,6 +87,46 @@ export const coupons = pgTable(
       table.startsAt,
       table.expiresAt,
     ),
+
+    // FR-12 integrity: positive values, percentage bounded, sane windows
+    // and limits. Codes are normalized uppercase, 3–32 chars
+    // ([A-Z0-9-_] by application validation).
+    check(
+      "coupons_value_positive",
+      sql`"value" > 0`,
+    ),
+    check(
+      "coupons_percentage_bounded",
+      sql`"type" <> 'PERCENTAGE' OR "value" <= 100`,
+    ),
+    check(
+      "coupons_minimum_non_negative",
+      sql`"minimum_order_amount" IS NULL OR "minimum_order_amount" >= 0`,
+    ),
+    check(
+      "coupons_max_discount_non_negative",
+      sql`"maximum_discount_amount" IS NULL OR "maximum_discount_amount" >= 0`,
+    ),
+    check(
+      "coupons_window_ordered",
+      sql`"starts_at" IS NULL OR "expires_at" IS NULL OR "expires_at" > "starts_at"`,
+    ),
+    check(
+      "coupons_usage_limit_non_negative",
+      sql`"usage_limit" IS NULL OR "usage_limit" >= 0`,
+    ),
+    check(
+      "coupons_per_user_limit_non_negative",
+      sql`"per_user_limit" IS NULL OR "per_user_limit" >= 0`,
+    ),
+    check(
+      "coupons_usage_count_non_negative",
+      sql`"usage_count" >= 0`,
+    ),
+    check(
+      "coupons_code_length",
+      sql`char_length("code") BETWEEN 3 AND 32`,
+    ),
   ],
 );
 
@@ -116,6 +160,15 @@ export const couponUsages = pgTable(
 
     discountAmount: numeric("discount_amount"),
 
+    // Immutable snapshot of the coupon as applied: historical orders keep
+    // explaining their discount even if the coupon is renamed, edited, or
+    // deactivated later. NULL on pre-policy rows means "unknown".
+    code: text("code"),
+
+    type: couponTypeEnum("type"),
+
+    value: numeric("value"),
+
     createdAt: timestamp("created_at", {
       mode: "date",
     })
@@ -123,6 +176,13 @@ export const couponUsages = pgTable(
       .defaultNow(),
   },
   (table) => [
+    // One redemption record per (coupon, order): retries and replays can
+    // never duplicate usage rows.
+    uniqueIndex("couponusages_coupon_order_unique").on(
+      table.couponId,
+      table.orderId,
+    ),
+
     index("couponusages_coupon_id_idx").on(
       table.couponId,
     ),

@@ -95,8 +95,9 @@ TotalAmount    = Subtotal − DiscountAmount + ShippingAmount + TaxAmount
    net). Line-level promotion ids plus the `couponusages` row preserve the
    full allocation for audit.
 
-Gap (unchanged): no per-user-limit column exists, so that SRS rule stays
-unenforced.
+Resolved: `coupons.per_user_limit` exists (migration 0022) and is enforced
+transactionally in `validateCouponForCheckout` alongside the global limit —
+see `docs/coupons.md`. Remaining gap: none on per-user accounting.
 
 ## Shipping configuration and rate computation
 
@@ -225,7 +226,8 @@ persisted row is authoritative, function arguments are not.
 
 ## Known limitations and operational prerequisites
 
-- Single supported currency (USD); single coupon; no per-user coupon limits.
+- Single supported currency (USD); single coupon per order. Per-user limits
+  are enforced (migration 0022, `docs/coupons.md`).
 - No approved shipping regions/fees beyond the documented defaults; variant
   weights unpopulated (limits dormant).
 - No approved tax jurisdictions (explicit zero-rate fallback; needs legal sign-off).

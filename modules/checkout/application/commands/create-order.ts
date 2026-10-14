@@ -569,7 +569,7 @@ async function createOrderTx(
         let coupon: ValidatedCoupon | null = null;
         if (ctx.canonical.couponCode) {
           coupon = await validateCouponForCheckout(
-            tx, ctx.canonical.couponCode, ctxSubtotal(ctx),
+            tx, ctx.canonical.couponCode, ctxSubtotal(ctx), user.id,
           );
         }
 

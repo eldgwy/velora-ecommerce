@@ -149,7 +149,7 @@ export async function previewCheckout(
     couponCode = rawCode;
     try {
       const validated = await db.transaction((tx) =>
-        validateCouponForCheckout(tx, rawCode, subtotalCents),
+        validateCouponForCheckout(tx, rawCode, subtotalCents, user.id),
       );
       couponDiscountCents = validated.discountCents;
     } catch (error) {
