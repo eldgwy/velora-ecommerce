@@ -63,6 +63,8 @@ export interface OrderHistoryEvent {
   previousStatus: string | null;
   eventType: string | null;
   actorType: string | null;
+  actorId: string | null;
+  correlationId: string | null;
   note: string | null;
   createdAt: Date;
 }
@@ -303,6 +305,8 @@ export async function getOrderDetail(
       previousStatus: h.previousStatus,
       eventType: h.eventType,
       actorType: h.actorType,
+      actorId: h.actorId,
+      correlationId: h.correlationId,
       note: h.note,
       createdAt: h.createdAt,
     })),

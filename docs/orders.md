@@ -8,7 +8,7 @@ States are the existing `order_status` enum — no parallel machines:
 |---|---|---|---|---|---|
 | none → `PENDING` | customer (checkout) | valid cart, reservation succeeds | order + items (`PENDING`) + addresses + history + payment (`PENDING`) + cart `CONVERTED` | reserved | `PENDING` |
 | `PENDING` → `PROCESSING` | webhook only | verified `payment_intent.succeeded`, active reservation | history row, order `PAID`, items `COMMITTED`, stock decremented + `SALE` | committed | `COMPLETED` |
-| `PENDING` → `CANCELLED` | customer/staff/admin/webhook/system | customer: `PENDING` + unpaid (BR-014); paid customer attempts rejected with refund-review escalation (no refund workflow exists) | release + history + order `CANCELLED` | released | unchanged (paid preserved) or `CANCELLED`/`FAILED`/`EXPIRED` |
+| `PENDING` → `CANCELLED` | customer/staff/admin/webhook/system | customer: `PENDING` + unpaid (BR-014); paid customer attempts rejected with refund-review escalation (refunds are admin-initiated via `requestRefund`, never automatic) | release + history + order `CANCELLED` | released | unchanged (paid preserved) or `CANCELLED`/`FAILED`/`EXPIRED` |
 | `PROCESSING` → `SHIPPED` | staff/admin | — | history row | none (sold at finalize) | none |
 | `SHIPPED` → `DELIVERED` | staff/admin | — | history row | none | none |
 | any → same | any | replay | none (no duplicate audit rows) | none | none |
@@ -31,8 +31,9 @@ server-side, and money never moves except through verified webhooks.
 
 - Customer: `PENDING` + payment `PENDING` → release via the reservation
   lifecycle (never twice — release is idempotent) → `CANCELLED`. Repeats succeed quietly.
-- Paid: blocked, support escalation (refunds table exists but no verified
-  refund workflow — unresolved, see below).
+- Paid: blocked, support escalation (refunds are admin-initiated through the
+  verified `requestRefund` workflow — partials capped, webhook-reconciled —
+  never automatic on cancellation).
 - Staff: `PENDING`/`PROCESSING` with mandatory recorded reason; `PAID` payment
   state preserved.
 - Races: cancel-after-finalize fails (`OrderAlreadyCompletedError` surfaced);
@@ -56,6 +57,16 @@ new state — written in the same transaction as the mutation. Webhook events
 are distinguishable (`actor_type: webhook`); failures/expiry record their
 trigger. Previously-missing rows were added: `PROCESSING` on finalization and
 failure-path histories.
+
+## Concurrency and locking
+
+Every state-changing command takes the order row `FOR UPDATE` before
+touching inventory, and inventory rows are always locked in sorted variant
+order — a single global order (order row → inventory rows), so concurrent
+transitions serialize without deadlock. Losers observe the winner's committed
+state and fail loudly (`OrderAlreadyCancelledError`,
+`InvalidOrderTransitionError`) or replay idempotently; they never silently
+overwrite. Failure webhooks never flip `COMPLETED`/`REFUNDED` payments.
 
 ## Notification behavior
 

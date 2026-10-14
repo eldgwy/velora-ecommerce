@@ -32,8 +32,10 @@ export interface TransitionRule {
  * - `PENDING → PROCESSING` is webhook-only (verified payment finalization).
  * - Customer cancellation is `PENDING → CANCELLED` only (BR-014); staff may
  *   also cancel `PROCESSING` orders (existing `cancelOrder` semantics).
- * - Paid orders are never cancelled by customers (no refund workflow exists;
- *   see docs/orders.md) — the command layer enforces the payment check.
+ * - Paid orders are never cancelled by customers: cancellation of a paid
+ *   order must go through the admin refund workflow
+ *   (`modules/payments/.../request-refund`) — the command layer enforces
+ *   the payment check and points at support-initiated review.
  * - `SHIPPED` / `DELIVERED` advance fulfillment; both are idempotent replays
  *   of the same state (handled by the command, not the matrix).
  */

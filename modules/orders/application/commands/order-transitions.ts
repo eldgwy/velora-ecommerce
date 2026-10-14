@@ -177,10 +177,10 @@ export async function deliverOrder(
 
 /**
  * Customer self-cancellation (BR-014): PENDING orders with unpaid status
- * only. Paid orders are rejected with an explicit escalation message — no
- * refund workflow exists, so an automatic refund is never promised.
-  * Ownership is verified here (order.userId === customerId), so callers
-  * cannot reach across customers. Repeated calls are safe.
+ * only. Paid orders are rejected with an explicit escalation message —
+ * refunds are admin-initiated via the refund workflow, never automatic.
+ * Ownership is verified here (order.userId === customerId), so callers
+ * cannot reach across customers. Repeated calls are safe.
  */
 export async function cancelOrderAsCustomer(
   orderId: string,

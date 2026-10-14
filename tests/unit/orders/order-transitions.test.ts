@@ -48,4 +48,30 @@ describe("order transition matrix", () => {
     expect(canTransitionOrder("PENDING", "PENDING", "customer")).toBe(true);
     expect(canTransitionOrder("CANCELLED", "CANCELLED", "webhook")).toBe(true);
   });
+
+  it("rejects every explicitly prohibited transition for every actor", () => {
+    const actors = ["customer", "staff", "admin", "webhook", "system"] as const;
+    const prohibited: Array<[Parameters<typeof canTransitionOrder>[0], Parameters<typeof canTransitionOrder>[1]]> = [
+      ["PENDING", "DELIVERED"],
+      ["DELIVERED", "PROCESSING"],
+      ["DELIVERED", "SHIPPED"],
+      ["DELIVERED", "CANCELLED"],
+      ["DELIVERED", "PENDING"],
+      ["CANCELLED", "PENDING"],
+      ["CANCELLED", "PROCESSING"],
+      ["CANCELLED", "SHIPPED"],
+      ["CANCELLED", "DELIVERED"],
+      ["SHIPPED", "PROCESSING"],
+      ["SHIPPED", "PENDING"],
+      ["SHIPPED", "CANCELLED"],
+      ["PROCESSING", "PENDING"],
+      ["PENDING", "SHIPPED"],
+    ];
+    for (const [from, to] of prohibited) {
+      for (const actor of actors) {
+        expect(canTransitionOrder(from, to, actor), `${from} → ${to} as ${actor}`).toBe(false);
+      }
+      expect(findTransition(from, to), `${from} → ${to}`).toBeNull();
+    }
+  });
 });

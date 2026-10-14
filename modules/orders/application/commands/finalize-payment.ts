@@ -93,7 +93,10 @@ export async function finalizeOrderPayment(
   options: { actorId?: string; requestId?: string; provider?: string } = {},
 ): Promise<FinalizePaymentResult> {
   return db.transaction(async (tx) => {
-    // 1. Lock the order and verify it exists
+    // 1. Lock the order row first so concurrent transitions (cancel, expiry,
+    // failure) serialize here instead of racing on stale snapshots. Every
+    // state-changing command takes the order lock before touching inventory,
+    // so no lock-order cycle is possible.
     const [order] = await tx
       .select({
         id: orders.id,
@@ -103,13 +106,14 @@ export async function finalizeOrderPayment(
         currency: orders.currency,
       })
       .from(orders)
-      .where(eq(orders.id, orderId));
+      .where(eq(orders.id, orderId))
+      .for("update");
 
     if (!order) {
       throw new OrderNotFoundError(orderId);
     }
 
-    // 2. Lock the payment and verify it exists and matches the order
+    // 2. Lock the payment row alongside the order for the same reason.
     const [payment] = await tx
       .select({
         id: payments.id,
@@ -121,7 +125,8 @@ export async function finalizeOrderPayment(
         status: payments.status,
       })
       .from(payments)
-      .where(eq(payments.id, paymentId));
+      .where(eq(payments.id, paymentId))
+      .for("update");
 
     if (!payment) {
       throw new Error(`Payment not found: ${paymentId}`);
@@ -382,7 +387,8 @@ export async function handlePaymentFailureWebhook(
         paymentStatus: orders.paymentStatus,
       })
       .from(orders)
-      .where(eq(orders.id, orderId));
+      .where(eq(orders.id, orderId))
+      .for("update");
 
     if (!order) {
       throw new OrderNotFoundError(orderId);
@@ -394,14 +400,27 @@ export async function handlePaymentFailureWebhook(
         status: payments.status,
       })
       .from(payments)
-      .where(eq(payments.id, paymentId));
+      .where(eq(payments.id, paymentId))
+      .for("update");
 
     if (!payment) {
       throw new Error(`Payment not found: ${paymentId}`);
     }
 
-    // Idempotency: if already failed, return
-    if (payment.status === "FAILED") {
+    // Idempotency: terminal payment states are final. In particular a
+    // COMPLETED (or REFUNDED) payment must never be flipped to FAILED by a
+    // stale or duplicate failure event — money was captured.
+    if (
+      payment.status &&
+      TERMINAL_PAYMENT_STATUSES.has(payment.status as PaymentStatus)
+    ) {
+      logger.warn("Ignoring payment failure for terminal payment", {
+        module: "orders",
+        action: "paymentFailureWebhookTerminal",
+        orderId,
+        paymentId,
+        paymentStatus: payment.status,
+      });
       return;
     }
 

@@ -89,6 +89,8 @@ export async function cancelOrder(
   assertOrderExists(orderId);
 
   return db.transaction(async (tx) => {
+    // Lock the order row so concurrent transitions (finalize, expiry,
+    // failure) serialize on fresh state instead of racing on snapshots.
     const [order] = await tx
       .select({
         id: orders.id,
@@ -96,7 +98,8 @@ export async function cancelOrder(
         paymentStatus: orders.paymentStatus,
       })
       .from(orders)
-      .where(eq(orders.id, orderId));
+      .where(eq(orders.id, orderId))
+      .for("update");
 
     if (!order) {
       throw new OrderNotFoundError(orderId);
@@ -172,6 +175,7 @@ export async function handlePaymentFailure(
   assertOrderExists(orderId);
 
   return db.transaction(async (tx) => {
+    // Same ordering lock as cancelOrder/finalize: serialize on fresh state.
     const [order] = await tx
       .select({
         id: orders.id,
@@ -179,7 +183,8 @@ export async function handlePaymentFailure(
         paymentStatus: orders.paymentStatus,
       })
       .from(orders)
-      .where(eq(orders.id, orderId));
+      .where(eq(orders.id, orderId))
+      .for("update");
 
     if (!order) {
       throw new OrderNotFoundError(orderId);
@@ -187,6 +192,23 @@ export async function handlePaymentFailure(
 
     // Idempotency: if payment already failed or cancelled, return success
     if (order.paymentStatus === "FAILED" || order.paymentStatus === "CANCELLED") {
+      return;
+    }
+
+    // Never overwrite a captured-money record with a failure: a PAID (or
+    // refunded) order that reaches this handler indicates a stale or
+    // duplicate failure signal, not an unpaid order.
+    if (
+      order.paymentStatus === "PAID" ||
+      order.paymentStatus === "REFUNDED" ||
+      order.paymentStatus === "PARTIALLY_REFUNDED"
+    ) {
+      logger.warn("Ignoring payment failure for paid order", {
+        module: "orders",
+        action: "paymentFailurePaidOrder",
+        orderId,
+        paymentStatus: order.paymentStatus,
+      });
       return;
     }
 
@@ -249,6 +271,7 @@ export async function handleCheckoutExpiration(
   assertOrderExists(orderId);
 
   return db.transaction(async (tx) => {
+    // Same ordering lock as the other transitions: serialize on fresh state.
     const [order] = await tx
       .select({
         id: orders.id,
@@ -257,7 +280,8 @@ export async function handleCheckoutExpiration(
         checkoutExpiresAt: orders.checkoutExpiresAt,
       })
       .from(orders)
-      .where(eq(orders.id, orderId));
+      .where(eq(orders.id, orderId))
+      .for("update");
 
     if (!order) {
       throw new OrderNotFoundError(orderId);
