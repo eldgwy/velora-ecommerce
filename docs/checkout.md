@@ -86,7 +86,14 @@ TotalAmount    = Subtotal − DiscountAmount + ShippingAmount + TaxAmount
    resolution); coupon usage is locked (`FOR UPDATE`), consumed in Tx1, and
    rolled back on compensation. Concurrent checkouts for the last usage
    serialize: exactly one wins.
-4. Discounts can never drive the merchandise base negative (cap + engine guard).
+4. Discounts can never drive the merchandise base negative (coupon capped at
+   the effective subtotal + engine guard). Note on stacked reporting: the
+   persisted `discount_amount` is the informational sum of promotion savings
+   (already embedded in effective unit prices) plus the coupon figure, so it
+   can exceed the effective subtotal when both apply — the charged total is
+   unaffected because promotions never double-count (unit prices are already
+   net). Line-level promotion ids plus the `couponusages` row preserve the
+   full allocation for audit.
 
 Gap (unchanged): no per-user-limit column exists, so that SRS rule stays
 unenforced.
@@ -100,8 +107,9 @@ unenforced.
   Default rules serve all destinations with no weight limits — deliberately
   permissive, fully restrictable without code changes elsewhere.
 - Weight comes from authoritative `product_variant.weight_grams` (nullable,
-  non-negative CHECK). Missing weight is a defined outcome: limits skipped,
-  surfaced in the preview (`weightKnown: false`), never guessed.
+  non-negative CHECK, safe-integer guarded at quote time). Missing weight is
+  a defined outcome: limits skipped, surfaced in the preview
+  (`weightKnown: false`), never guessed.
 - Unsupported destinations/methods fail closed (`UnsupportedDestinationError`
   / `ShippingMethodError` → structured `SHIPPING_INVALID`, no silent fallback).
 - To enable live checkout with real policy: approve region allowlists, weight
@@ -131,7 +139,12 @@ coupon usage. Pre-policy rows keep NULLs (unknown, never fabricated).
 
 ## Price-change confirmation behavior
 
-Preview totals are displayed, never charged. Placement with a matching
+Preview totals are displayed, never charged. Coupon handling in preview
+distinguishes error classes: coupon-domain failures surface as
+`couponValid: false` with the coupon message (usage never consumed), while
+infrastructure failures (connection loss, lock timeouts) rethrow so the
+preview fails loudly instead of showing a total that placement would reject.
+Placement with a matching
 `expectedTotalCents` proceeds; any drift (price, stock, shipping, tax,
 promotions, coupon) aborts pre-commit with `TOTAL_CHANGED`, and the UI shows
 the fresh breakdown with an explicit confirm control that re-places against
@@ -152,6 +165,23 @@ retrieve rather than recreate. Webhook dedup + finalization unchanged.
   `order_items.promotion_id`, `product_variant.weight_grams`.
 - New dependency `decimal.js@10.6.0` (MIT, zero dependencies).
 - No env changes. No Stripe/API changes.
+
+## Development setup and test fixtures
+
+- Unit tests (`tests/unit/checkout/`): pure domain math, no DB —
+  `money.test.ts`, `calculation.test.ts` (incl. half-up boundaries,
+  fractional percentages, taxable-base flooring), `shipping-tax.test.ts`
+  (regions, weight limits incl. overflow guard, jurisdiction matching),
+  `pricing.test.ts` (legacy pinned wrappers), `checkout-schemas.test.ts`
+  (client money fields rejected).
+- Integration tests run against the shared dev database with per-file
+  `SFX`-scoped fixtures and FK-ordered cleanup: `checkout.test.ts`
+  (pipeline, idempotency, compensation, webhooks),
+  `checkout-totals.test.ts` (preview↔placement agreement, confirmation,
+  coupon race), `checkout-hardening.test.ts` (error classification,
+  full-discount flooring, cross-customer rejection).
+- No production data, live payments, or real emails are ever used; Stripe
+  and SMTP remain mocked/absent in tests.
 
 ## Known limitations and operational prerequisites
 

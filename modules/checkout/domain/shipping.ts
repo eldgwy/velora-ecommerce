@@ -12,9 +12,9 @@ import { UnsupportedDestinationError } from "./errors";
  * codes; `"*"` means worldwide. Narrowing a method to specific regions is a
  * configuration change — unsupported destinations then fail closed.
  *
- * Weight: the catalog carries no per-variant weight yet (see
- * `weight_grams`, nullable). Rules with `maxWeightGrams` are skipped while
- * weight is unknown rather than guessed — deterministic and documented.
+ * Weight: authoritative per-unit grams live in `product_variant.weight_grams`
+ * (nullable, non-negative CHECK). Rules with `maxWeightGrams` are skipped
+ * while weight is unknown rather than guessed — deterministic and documented.
  */
 
 export const SHIPPING_METHODS = {
@@ -92,7 +92,13 @@ export function calculateShipmentWeightGrams(
     if (!Number.isInteger(line.quantity) || line.quantity < 0) {
       throw new Error("Invalid shipment line quantity.");
     }
+    if (!Number.isSafeInteger(line.weightGrams) || line.weightGrams < 0) {
+      throw new Error("Invalid shipment line weight.");
+    }
     total += line.weightGrams * line.quantity;
+    if (!Number.isSafeInteger(total)) {
+      throw new Error("Shipment weight overflows safe integer range.");
+    }
   }
   return total;
 }
@@ -104,7 +110,8 @@ export interface ShippingQuote {
   taxableCents: number;
 }
 
-export interface ShippingQuoteInput {  method: ShippingMethodId;
+export interface ShippingQuoteInput {
+  method: ShippingMethodId;
   country: string | null | undefined;
   subtotalAfterDiscountsCents: number;
   weightGrams: number | null;

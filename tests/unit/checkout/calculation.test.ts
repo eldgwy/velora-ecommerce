@@ -93,8 +93,25 @@ describe("checkout totals engine (BR-002)", () => {
     expect(untaxed.taxCents).toBe(360);
   });
 
-  it("guards discount, base, currency, and overflow boundaries", () => {
-    expect(() => calculateCheckoutTotals(base({ couponDiscountCents: 3601 }))).toThrow(/coupon/);
+  it("floors the taxable base at zero under a full-merchandise discount", () => {
+    // Coupon wipes the merchandise subtotal: base is max(0, 0 + shipping).
+    const totals = calculateCheckoutTotals(
+      base({
+        couponDiscountCents: 3600,
+        shippingCents: 499,
+        taxableShippingCents: 0,
+        taxRateBps: 1000,
+        taxJurisdiction: "T-TEST",
+      }),
+    );
+    expect(totals.discountedBaseCents).toBe(0);
+    expect(totals.taxableBaseCents).toBe(0);
+    expect(totals.taxCents).toBe(0);
+    expect(totals.totalCents).toBe(499);
+    expect(totals.totalDiscountCents).toBe(400 + 3600);
+  });
+
+  it("guards discount, base, currency, and overflow boundaries", () => {    expect(() => calculateCheckoutTotals(base({ couponDiscountCents: 3601 }))).toThrow(/coupon/);
     expect(() => calculateCheckoutTotals(base({ taxableShippingCents: 500 }))).toThrow(/taxable shipping/);
     expect(() => calculateCheckoutTotals(base({ currency: "EUR" }))).toThrow(/currency/i);
     expect(() => calculateCheckoutTotals(base({ currency: "JPY" }))).toThrow(/currency/i);

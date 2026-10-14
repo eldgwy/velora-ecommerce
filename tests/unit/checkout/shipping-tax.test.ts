@@ -45,6 +45,17 @@ describe("shipment weight", () => {
       calculateShipmentWeightGrams([{ weightGrams: 10, quantity: -1 }]),
     ).toThrow();
   });
+
+  it("rejects negative weights and overflowing totals", () => {
+    expect(() =>
+      calculateShipmentWeightGrams([{ weightGrams: -5, quantity: 1 }]),
+    ).toThrow(/weight/);
+    expect(() =>
+      calculateShipmentWeightGrams([
+        { weightGrams: Number.MAX_SAFE_INTEGER, quantity: 2 },
+      ]),
+    ).toThrow(/overflow/);
+  });
 });
 
 describe("destination and weight rules", () => {

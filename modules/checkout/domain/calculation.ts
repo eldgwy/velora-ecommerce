@@ -74,7 +74,9 @@ export interface TotalsBreakdown {
   subtotalCents: number;
   promotionDiscountCents: number;
   couponDiscountCents: number;
-  /** Promotion + coupon. Never exceeds the merchandise subtotal. */
+  /** Promotion + coupon (informational sum; the coupon alone is capped at
+   *  the effective subtotal, while promotion savings are already embedded
+   *  in effective prices — see stacking policy above). */
   totalDiscountCents: number;
   /** Merchandise subtotal after coupon, before shipping/tax. */
   discountedBaseCents: number;

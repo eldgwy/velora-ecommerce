@@ -28,6 +28,7 @@ import {
   AddressOwnershipError,
   CartConflictError,
   CartConsumedError,
+  CouponInvalidError,
   EmptyCartError,
 } from "@/modules/checkout/domain/errors";
 
@@ -152,9 +153,13 @@ export async function previewCheckout(
       );
       couponDiscountCents = validated.discountCents;
     } catch (error) {
+      // Only coupon-domain failures mean "coupon does not apply".
+      // Anything else (connection loss, lock timeout) is an infrastructure
+      // failure: rethrow so the preview fails loudly instead of showing a
+      // total that placement would then reject.
+      if (!(error instanceof CouponInvalidError)) throw error;
       couponValid = false;
-      couponMessage =
-        error instanceof Error ? error.message : "That coupon does not apply.";
+      couponMessage = error.message;
     }
   }
 
