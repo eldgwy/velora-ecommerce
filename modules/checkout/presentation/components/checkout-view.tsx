@@ -18,6 +18,7 @@ import {
 import type { CheckoutResult } from "@/modules/checkout/application/commands/create-order";
 import type { CheckoutSummary } from "@/modules/checkout/application/queries/checkout-summary";
 import { CheckoutReview } from "@/modules/checkout/presentation/components/checkout-review";
+import { StripePaymentForm } from "@/modules/checkout/presentation/components/stripe-payment-form";
 
 interface CheckoutViewProps {
   initial: CheckoutSummary;
@@ -523,6 +524,15 @@ function Confirmation({
           <Badge variant="outline">Payment pending</Badge>
         )}
       </div>
+      {result.payment.provider === "stripe" && result.payment.clientSecret ? (
+        <div className="w-full max-w-md">
+          <StripePaymentForm
+            orderId={result.orderId}
+            orderNumber={result.orderNumber}
+            clientSecret={result.payment.clientSecret}
+          />
+        </div>
+      ) : null}
       {result.payment.provider === "stripe" && result.payment.paymentRequired && !result.payment.clientSecret ? (
         <div className="flex flex-col items-center gap-2 text-sm">
           <p className="text-xs text-muted-foreground">

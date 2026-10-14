@@ -873,7 +873,8 @@ async function replayPriorOrder(
   }
   const payment = await initializeOrderPayment(
     userId, orderId, input.paymentMethod,
-    Math.round(Number(order.totalAmount) * 100), CHECKOUT_CURRENCY,
+    toMinorUnits(order.totalAmount, CHECKOUT_CURRENCY),
+    CHECKOUT_CURRENCY,
   );
   const base = await loadOrderResult(orderId);
   return { ...base, payment, replayed: true };

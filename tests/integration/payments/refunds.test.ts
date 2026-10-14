@@ -173,6 +173,10 @@ describe("refund workflow", () => {
 
     const [order] = await testDb.select().from(orders).where(eq(orders.id, orderId));
     expect(order!.paymentStatus).toBe("REFUNDED");
+    // Full refund mirrors COMPLETED → REFUNDED onto the payment row: the
+    // payment is terminal and can never be finalized or failed again.
+    const [pay] = await testDb.select().from(payments).where(eq(payments.id, paymentId));
+    expect(pay!.status).toBe("REFUNDED");
     // No restock: inventory untouched by money movement.
     expect(await movementCount()).toBe(movesBefore);
     const [inv] = await testDb.select().from(inventory).where(eq(inventory.id, inventoryId));
@@ -180,9 +184,11 @@ describe("refund workflow", () => {
   });
 
   it("rejects anything beyond the captured amount (BR-007)", async () => {
+    // The payment is REFUNDED-terminal after the full refund above, so the
+    // terminal-state guard rejects before any Stripe call — the cap holds.
     await expect(
       requestRefund({ orderId, amountCents: 1, reason: "extra", actorId: "admin-1" }),
-    ).rejects.toThrow(/Nothing remains refundable/);
+    ).rejects.toThrow(/only available for completed payments/);
     expect(refundsCreateMock).not.toHaveBeenCalled();
   });
 });

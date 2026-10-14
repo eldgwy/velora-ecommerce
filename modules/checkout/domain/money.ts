@@ -64,8 +64,9 @@ function toDecimalAmount(amount: string | number | Decimal, label: string): Deci
  */
 export function toMinorUnits(
   amount: string | number | Decimal,
-  currency: SupportedCurrency = "USD",
+  currency: string = "USD",
 ): number {
+  assertSupportedCurrency(currency);
   const { minorUnits } = CURRENCIES[currency];
   const minor = toDecimalAmount(amount, "amount")
     .mul(new Decimal(10).pow(minorUnits))
@@ -83,11 +84,12 @@ export function toMinorUnits(
 /** Integer minor units → exact major-unit storage string (`"58.49"`). */
 export function fromMinorUnits(
   minor: number,
-  currency: SupportedCurrency = "USD",
+  currency: string = "USD",
 ): string {
   if (!Number.isSafeInteger(minor)) {
     throw new Error("Minor-unit amount must be a safe integer.");
   }
+  assertSupportedCurrency(currency);
   const { minorUnits } = CURRENCIES[currency];
   return new Decimal(minor).div(new Decimal(10).pow(minorUnits)).toFixed(minorUnits);
 }
@@ -95,8 +97,9 @@ export function fromMinorUnits(
 /** Display helper for server-computed minor-unit totals (exact, no float). */
 export function formatMinorUnits(
   minor: number,
-  currency: SupportedCurrency = "USD",
+  currency: string = "USD",
 ): string {
+  assertSupportedCurrency(currency);
   const symbol = currency === "USD" ? "$" : `${currency} `;
   return `${symbol}${fromMinorUnits(minor, currency).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
 }

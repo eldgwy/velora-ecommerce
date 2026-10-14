@@ -137,6 +137,7 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
               orderId={order.id}
               status={order.status}
               paymentStatus={order.paymentStatus}
+              paymentMethod={order.paymentMethod}
             />
           </section>
           <section className="rounded-xl bg-white p-5 text-sm ring-1 ring-foreground/10" aria-label="Delivery">

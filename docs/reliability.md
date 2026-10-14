@@ -46,6 +46,13 @@ Implemented minimal admin workflow (`modules/payments/.../request-refund.ts`):
 - Webhook `charge.refunded` reconciles by converging local COMPLETED totals
   to provider `amount_refunded` (idempotent); over-reports are logged as
   errors and recorded as nothing.
+- Full refunds mirror `COMPLETED → REFUNDED` onto the `payments` row
+  (conditional on `COMPLETED`, so concurrent twins converge); partials leave
+  it `COMPLETED`. The terminal payment guard plus an order-level paid check
+  therefore reject stale failure events after any refund, and the remaining
+  cap stays enforced for legacy rows refunded before this mirror existed.
+- Webhook event state changes are scoped by `(provider, provider_event_id)`
+  to match the table's unique key.
 - Inventory: NEVER restocked by refunds (explicit rule, also in the customer
   email). Verified returns use `restockReturn` as a separate authorized step.
 - Blockers remaining: live `STRIPE_SECRET_KEY` required (calls blocked

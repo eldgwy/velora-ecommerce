@@ -157,6 +157,46 @@ Stripe `PaymentIntent.amount` is built from the persisted order total in
 minor units with order-scoped idempotency (`checkout-{orderId}`); retries
 retrieve rather than recreate. Webhook dedup + finalization unchanged.
 
+## Payment processing
+
+Supported methods: cards and wallets through Stripe, plus Cash on Delivery.
+`initializeOrderPayment` re-reads the persisted order total and currency and
+rejects any caller-supplied figure that disagrees with storage — the
+persisted row is authoritative, function arguments are not.
+
+- **Cards & wallets.** Intents are created with `automatic_payment_methods`
+  (`enabled: true`, redirects off), so Stripe offers every method the
+  account enables — cards plus Apple Pay / Google Pay on supported devices —
+  with no per-wallet code. The checkout confirmation step renders a Stripe
+  Elements form (lazy-loaded `stripe.js`, Payment Element) only when the
+  server has issued a client secret; only the publishable key and client
+  secret enter the browser. Confirmation redirects to the order page while
+  the verified webhook finalizes — the UI never marks payment complete.
+  Prerequisites: live `STRIPE_SECRET_KEY` + `STRIPE_PUBLISHABLE_KEY`, wallet
+  methods enabled in the Stripe dashboard, HTTPS + registered domain for
+  Apple Pay. None of this is verifiable without those credentials.
+- **Cash on Delivery.** No Stripe intent is ever created for COD orders;
+  creation and shipment never mark them paid. Cash is recorded exclusively
+  through the staff/admin `collectCodPayment` operation, which requires a
+  `SHIPPED`/`DELIVERED` order with a `PENDING` COD payment, is idempotent on
+  replay, writes a `payment_collected` audit row, and never invokes Stripe
+  code paths. COD orders can ship straight from `PENDING` (card orders must
+  pass through `PROCESSING` via verified payment).
+- **State machine.** `modules/payments/domain/payment-transitions.ts` is the
+  single authority (`PENDING → COMPLETED|FAILED`, `COMPLETED → REFUNDED`,
+  `FAILED`/`REFUNDED` terminal). Webhook handlers enforce terminal guards so
+  stale failure events can never downgrade captured money. A full refund
+  additionally flips the `payments` row to `REFUNDED` (partials keep
+  `COMPLETED`); the pre-mirror cap check remains as the backstop for legacy
+  rows. Late verified payments against cancelled/expired orders are rejected
+  loudly (failed webhook event, safe to leave for operator review) — never
+  fulfilled without stock.
+- **Webhook validation.** Signature verified against the raw body before any
+  processing (400 on missing/invalid); `payment_intent.succeeded` carries
+  the event's amount/currency into finalization, which re-checks them
+  against persisted records post-lock — mismatches abort before mutation
+  (FAILED event, retried by Stripe, surfaced in logs).
+
 ## Migration and deployment requirements
 
 - `0020_checkout_financial_snapshot` (additive, nullable; policy default

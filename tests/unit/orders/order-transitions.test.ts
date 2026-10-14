@@ -31,7 +31,14 @@ describe("order transition matrix", () => {
   it("lets staff advance fulfillment but never skip stages", () => {
     expect(canTransitionOrder("PROCESSING", "SHIPPED", "staff")).toBe(true);
     expect(canTransitionOrder("SHIPPED", "DELIVERED", "admin")).toBe(true);
-    expect(canTransitionOrder("PENDING", "SHIPPED", "staff")).toBe(false);
+    // PENDING → SHIPPED exists only for unpaid COD orders; the command (not
+    // the matrix) enforces the payment precondition. Card orders still must
+    // pass through PROCESSING, and no other actor may use this edge.
+    expect(canTransitionOrder("PENDING", "SHIPPED", "staff")).toBe(true);
+    expect(canTransitionOrder("PENDING", "SHIPPED", "admin")).toBe(true);
+    expect(canTransitionOrder("PENDING", "SHIPPED", "customer")).toBe(false);
+    expect(canTransitionOrder("PENDING", "SHIPPED", "webhook")).toBe(false);
+    expect(canTransitionOrder("PENDING", "SHIPPED", "system")).toBe(false);
     expect(canTransitionOrder("PROCESSING", "DELIVERED", "staff")).toBe(false);
     expect(canTransitionOrder("SHIPPED", "PROCESSING", "admin")).toBe(false);
   });
@@ -65,7 +72,8 @@ describe("order transition matrix", () => {
       ["SHIPPED", "PENDING"],
       ["SHIPPED", "CANCELLED"],
       ["PROCESSING", "PENDING"],
-      ["PENDING", "SHIPPED"],
+      // NOTE: PENDING → SHIPPED is legal for staff/admin on unpaid COD
+      // orders only (see test above); it is intentionally absent here.
     ];
     for (const [from, to] of prohibited) {
       for (const actor of actors) {

@@ -4,6 +4,7 @@ import { db } from "@/infrastructure/database";
 import { inventory, inventoryMovements } from "@/infrastructure/database/schema/inventory";
 import { orderItems, orders, orderStatusHistories, payments, webhookEvents } from "@/infrastructure/database/schema/orders";
 import { orderPaymentStatusEnum, orderReservationStatusEnum, orderStatusEnum, paymentStatusEnum } from "@/infrastructure/database/schema/enums";
+import { toMinorUnits } from "@/modules/checkout/domain/money";
 import { logger } from "@/shared/lib/logging/logger";
 import {
   OrderNotFoundError,
@@ -90,7 +91,14 @@ async function lockInventoryForVariants(
 export async function finalizeOrderPayment(
   orderId: string,
   paymentId: string,
-  options: { actorId?: string; requestId?: string; provider?: string } = {},
+  options: {
+    actorId?: string;
+    requestId?: string;
+    provider?: string;
+    /** Provider-reported charge, verified against persisted records below. */
+    expectedAmountCents?: number;
+    expectedCurrency?: string;
+  } = {},
 ): Promise<FinalizePaymentResult> {
   return db.transaction(async (tx) => {
     // 1. Lock the order row first so concurrent transitions (cancel, expiry,
@@ -134,6 +142,32 @@ export async function finalizeOrderPayment(
 
     if (payment.orderId !== orderId) {
       throw new Error(`Payment ${paymentId} does not belong to order ${orderId}`);
+    }
+
+    // Provider relationship validation: when the caller supplies the
+    // event-reported amount/currency, they must agree with the persisted
+    // records before anything mutates. A mismatch aborts (FAILED webhook
+    // event, safe to retry) instead of marking the wrong order paid.
+    if (options.expectedAmountCents !== undefined || options.expectedCurrency !== undefined) {
+      const persistedCents = toMinorUnits(payment.amount ?? "0", order.currency);
+      if (
+        (options.expectedAmountCents !== undefined &&
+          options.expectedAmountCents !== persistedCents) ||
+        (options.expectedCurrency !== undefined &&
+          options.expectedCurrency.toLowerCase() !== order.currency.toLowerCase())
+      ) {
+        logger.error("Payment amount/currency mismatch, refusing to finalize", {
+          module: "orders",
+          action: "finalizeAmountMismatch",
+          orderId,
+          paymentId,
+          expectedAmountCents: options.expectedAmountCents ?? null,
+          persistedCents,
+        });
+        throw new InvalidOrderTransitionError(
+          "Provider amount does not match the order total.",
+        );
+      }
     }
 
     // 3. Check if payment is already completed (idempotency)
@@ -420,6 +454,26 @@ export async function handlePaymentFailureWebhook(
         orderId,
         paymentId,
         paymentStatus: payment.status,
+      });
+      return;
+    }
+
+    // Defense in depth: the order-level record agrees. A PAID or refunded
+    // order that reaches this handler indicates a stale or duplicate failure
+    // signal (the payment row and order row update atomically, so a split
+    // here would mean an inconsistent write) — never downgrade captured
+    // money through an ordinary event.
+    if (
+      order.paymentStatus === "PAID" ||
+      order.paymentStatus === "REFUNDED" ||
+      order.paymentStatus === "PARTIALLY_REFUNDED"
+    ) {
+      logger.warn("Ignoring payment failure for paid order", {
+        module: "orders",
+        action: "paymentFailureWebhookPaidOrder",
+        orderId,
+        paymentId,
+        orderPaymentStatus: order.paymentStatus,
       });
       return;
     }

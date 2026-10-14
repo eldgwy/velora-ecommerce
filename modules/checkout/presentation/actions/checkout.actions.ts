@@ -233,6 +233,19 @@ export async function previewCheckoutAction(
   }
 }
 
+/**
+ * Publishable key for Stripe Elements. The secret key never leaves the
+ * server; the publishable key is public by design. Returns null when card
+ * payments are not configured so the UI degrades to COD/retry messaging.
+ */
+export async function getPaymentConfigAction(): Promise<
+  ActionResult<{ publishableKey: string | null }>
+> {
+  const session = await getCurrentSession();
+  if (!session) return { ok: false, error: "You must be signed in." };
+  return { ok: true, data: { publishableKey: process.env.STRIPE_PUBLISHABLE_KEY ?? null } };
+}
+
 export async function retryPaymentAction(
   orderId: unknown,
 ): Promise<ActionResult<{ orderId: string; clientSecret: string | null; paymentRequired: boolean }>> {

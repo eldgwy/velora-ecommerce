@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import Stripe from "stripe";
 
 import { db } from "@/infrastructure/database";
+import { toMinorUnits, fromMinorUnits } from "@/modules/checkout/domain/money";
 import {
   orders,
   orderStatusHistories,
@@ -80,7 +81,7 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
     const rows = (await tx.execute(sql`
       SELECT p.id AS "paymentId", p.order_id AS "orderId",
              p.provider AS "provider", p.provider_payment_id AS "providerPaymentId",
-             p.amount AS "amount", p.status AS "status",
+             p.amount AS "amount", p.currency AS "currency", p.status AS "status",
              o.status AS "orderStatus", o.payment_status AS "orderPaymentStatus"
       FROM payments AS p
       JOIN orders AS o ON o.id = p.order_id
@@ -92,6 +93,7 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       provider: string | null;
       providerPaymentId: string | null;
       amount: string | null;
+      currency: string | null;
       status: string | null;
       orderStatus: string;
       orderPaymentStatus: string | null;
@@ -109,7 +111,7 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       );
     }
 
-    const capturedCents = Math.round(Number(payment.amount) * 100);
+    const capturedCents = toMinorUnits(payment.amount ?? "0", payment.currency ?? "USD");
     const prior = await tx
       .select({ amount: refunds.amount })
       .from(refunds)
@@ -117,7 +119,7 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
         and(eq(refunds.paymentId, payment.paymentId), eq(refunds.status, "COMPLETED")),
       );
     const refundedCents = prior.reduce(
-      (s, r) => s + Math.round(Number(r.amount) * 100),
+      (s, r) => s + toMinorUnits(r.amount ?? "0", payment.currency ?? "USD"),
       0,
     );
     const remaining = capturedCents - refundedCents;
@@ -140,7 +142,7 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
         and(
           eq(refunds.paymentId, payment.paymentId),
           eq(refunds.status, "PENDING"),
-          eq(refunds.amount, (amountCents / 100).toFixed(2)),
+          eq(refunds.amount, fromMinorUnits(amountCents, payment.currency ?? "USD")),
         ),
       );
     if (pending) {
@@ -151,7 +153,7 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       .insert(refunds)
       .values({
         paymentId: payment.paymentId,
-        amount: (amountCents / 100).toFixed(2),
+        amount: fromMinorUnits(amountCents, payment.currency ?? "USD"),
         reason: request.reason.trim().slice(0, 500),
         status: "PENDING",
       })
@@ -233,8 +235,11 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
           eq(refunds.status, "COMPLETED"),
         ),
       );
-    const otherCents = others.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
-    const capturedCents = Math.round(Number(staged.payment.amount) * 100);
+    const otherCents = others.reduce(
+      (s, r) => s + toMinorUnits(r.amount ?? "0", staged.payment.currency ?? "USD"),
+      0,
+    );
+    const capturedCents = toMinorUnits(staged.payment.amount ?? "0", staged.payment.currency ?? "USD");
     if (otherCents + staged.amountCents > capturedCents) {
       // A reconcile row covered our amount mid-flight: our row would
       // double-count locally (Stripe moved money once). Cancel ours.
@@ -273,14 +278,36 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       .where(
         and(eq(refunds.paymentId, staged.payment.paymentId), eq(refunds.status, "COMPLETED")),
       );
-    const totalCents = all.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
+    const totalCents = all.reduce(
+      (s, r) => s + toMinorUnits(r.amount ?? "0", staged.payment.currency ?? "USD"),
+      0,
+    );
+    const fullyRefunded = totalCents >= capturedCents;
     await tx
       .update(orders)
       .set({
-        paymentStatus: totalCents >= capturedCents ? "REFUNDED" : "PARTIALLY_REFUNDED",
+        paymentStatus: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
         updatedAt: new Date(),
       })
       .where(eq(orders.id, request.orderId));
+
+    if (fullyRefunded) {
+      // Mirror the COMPLETED → REFUNDED payment transition onto the payment
+      // row so the domain matrix and the database agree: a fully refunded
+      // payment is terminal and can never be flipped to FAILED by a stale
+      // failure event nor finalized again by an old success event. Partial
+      // refunds deliberately leave the payment COMPLETED (money still held).
+      // Conditional on COMPLETED so a concurrent twin's update wins safely.
+      await tx
+        .update(payments)
+        .set({ status: "REFUNDED", updatedAt: new Date() })
+        .where(
+          and(
+            eq(payments.id, staged.payment.paymentId),
+            eq(payments.status, "COMPLETED"),
+          ),
+        );
+    }
 
     const [order] = await tx
       .select({ status: orders.status })
@@ -294,7 +321,7 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
       actorType: request.actorType ?? "admin",
       actorId: request.actorId,
       correlationId: staged.refundId,
-      note: `Refund ${(staged.amountCents / 100).toFixed(2)} issued (${stripeRefund.id})`,
+      note: `Refund ${fromMinorUnits(staged.amountCents, staged.payment.currency ?? "USD")} issued (${stripeRefund.id})`,
     });
     return { convergedTo: null as string | null, providerRefundId: stripeRefund.id };
   });
@@ -384,7 +411,7 @@ export async function reconcileRefundEvent(input: {
   amountRefundedCents: number;
 }): Promise<{ reconciled: boolean; reason: string }> {
   const [payment] = await db
-    .select({ id: payments.id, orderId: payments.orderId, amount: payments.amount })
+    .select({ id: payments.id, orderId: payments.orderId, amount: payments.amount, currency: payments.currency })
     .from(payments)
     .where(eq(payments.providerPaymentId, input.paymentIntentId));
   if (!payment) {
@@ -398,13 +425,16 @@ export async function reconcileRefundEvent(input: {
       .where(
         and(eq(refunds.paymentId, payment.id), eq(refunds.status, "COMPLETED")),
       );
-    const localCents = rows.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
+    const localCents = rows.reduce(
+      (s, r) => s + toMinorUnits(r.amount ?? "0", payment.currency ?? "USD"),
+      0,
+    );
     if (localCents >= input.amountRefundedCents) {
       return { reconciled: false, reason: "already-recorded" };
     }
 
     const missing = input.amountRefundedCents - localCents;
-    const capturedCents = Math.round(Number(payment.amount) * 100);
+    const capturedCents = toMinorUnits(payment.amount ?? "0", payment.currency ?? "USD");
     if (localCents + missing > capturedCents) {
       // Provider reports more than captured: record nothing, flag loudly.
       const { logger } = await import("@/shared/lib/logging/logger");
@@ -422,7 +452,7 @@ export async function reconcileRefundEvent(input: {
     await tx.insert(refunds).values({
       paymentId: payment.id,
       providerRefundId: `stripe-reconcile-${input.chargeId}`,
-      amount: (missing / 100).toFixed(2),
+      amount: fromMinorUnits(missing, payment.currency ?? "USD"),
       reason: "Reconciled from charge.refunded webhook",
       status: "COMPLETED",
     });
@@ -430,13 +460,27 @@ export async function reconcileRefundEvent(input: {
       .select({ status: orders.status, paymentStatus: orders.paymentStatus })
       .from(orders)
       .where(eq(orders.id, payment.orderId));
+    const fullyRefunded = localCents + missing >= capturedCents;
     await tx
       .update(orders)
       .set({
-        paymentStatus: localCents + missing >= capturedCents ? "REFUNDED" : "PARTIALLY_REFUNDED",
+        paymentStatus: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
         updatedAt: new Date(),
       })
       .where(eq(orders.id, payment.orderId));
+    if (fullyRefunded) {
+      // Same COMPLETED → REFUNDED mirror as the admin flow (conditional, so
+      // concurrent reconciliations converge without overwriting each other).
+      await tx
+        .update(payments)
+        .set({ status: "REFUNDED", updatedAt: new Date() })
+        .where(
+          and(
+            eq(payments.id, payment.id),
+            eq(payments.status, "COMPLETED"),
+          ),
+        );
+    }
     await tx.insert(orderStatusHistories).values({
       orderId: payment.orderId,
       status: order!.status as typeof orders.status.enumValues[number],
@@ -445,7 +489,7 @@ export async function reconcileRefundEvent(input: {
       actorType: "webhook",
       actorId: input.chargeId,
       correlationId: input.chargeId,
-      note: `Reconciled ${(missing / 100).toFixed(2)} from provider event`,
+      note: `Reconciled ${fromMinorUnits(missing, payment.currency ?? "USD")} from provider event`,
     });
     return { reconciled: true, reason: "recorded" };
   });

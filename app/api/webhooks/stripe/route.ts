@@ -128,17 +128,30 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
     let result: { success: boolean; error?: string } = { success: false };
 
     switch (eventType) {
-      case "payment_intent.succeeded":
-        // Payment succeeded - finalize the order
+      case "payment_intent.succeeded": {
+        // Payment succeeded - finalize the order. The event's amount and
+        // currency are forwarded so finalization can verify them against the
+        // persisted records; a mismatch aborts before any mutation.
+        const expectedAmountCents =
+          typeof object.amount_received === "number"
+            ? object.amount_received
+            : typeof object.amount === "number"
+              ? object.amount
+              : undefined;
+        const expectedCurrency =
+          typeof object.currency === "string" ? object.currency : undefined;
         await finalizeOrderPayment(orderId, paymentId, {
           actorId: "webhook",
           requestId: eventId,
           provider: "stripe",
+          expectedAmountCents,
+          expectedCurrency,
         });
         // Post-commit notice only; a send failure never fails the webhook.
         await dispatchOrderNotification(orderId, "payment_succeeded");
         result = { success: true };
         break;
+      }
 
       case "payment_intent.payment_failed":
       case "payment_intent.canceled":
@@ -200,7 +213,8 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
         result = { success: true };
     }
 
-    // Mark event as completed
+    // Mark event as completed. Scoped by (provider, event id) to match the
+    // table's unique key — an event id alone is not globally unique.
     await db
       .update(webhookEvents)
       .set({
@@ -208,13 +222,18 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
         completedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(webhookEvents.providerEventId, eventId));
+      .where(
+        and(
+          eq(webhookEvents.provider, "stripe"),
+          eq(webhookEvents.providerEventId, eventId),
+        ),
+      );
 
     return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     
-    // Mark event as failed
+    // Mark event as failed. Scoped by (provider, event id) — see above.
     await db
       .update(webhookEvents)
       .set({
@@ -222,7 +241,12 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
         errorMessage,
         updatedAt: new Date(),
       })
-      .where(eq(webhookEvents.providerEventId, eventId));
+      .where(
+        and(
+          eq(webhookEvents.provider, "stripe"),
+          eq(webhookEvents.providerEventId, eventId),
+        ),
+      );
 
     logger.error("Webhook processing failed", {
       module: "webhooks",

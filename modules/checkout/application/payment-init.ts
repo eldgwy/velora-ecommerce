@@ -7,6 +7,7 @@ import {
   OrderNotFoundError,
   PaymentInitError,
 } from "@/modules/checkout/domain/errors";
+import { toMinorUnits } from "@/modules/checkout/domain/money";
 
 export interface PaymentInitResult {
   paymentId: string;
@@ -50,11 +51,31 @@ export async function initializeOrderPayment(
   currency: string,
 ): Promise<PaymentInitResult> {
   const [order] = await db
-    .select({ id: orders.id, userId: orders.userId, status: orders.status })
+    .select({
+      id: orders.id,
+      userId: orders.userId,
+      status: orders.status,
+      totalAmount: orders.totalAmount,
+      currency: orders.currency,
+    })
     .from(orders)
     .where(eq(orders.id, orderId));
   if (!order || order.userId !== userId) {
     throw new OrderNotFoundError(orderId);
+  }
+
+  // The persisted order total is authoritative. The amount argument exists
+  // only so callers pass what they computed; any disagreement with storage
+  // aborts instead of charging a client-influenced figure.
+  const persistedCents = toMinorUnits(order.totalAmount, order.currency);
+  if (
+    !Number.isSafeInteger(totalCents) ||
+    totalCents !== persistedCents ||
+    currency.toLowerCase() !== order.currency.toLowerCase()
+  ) {
+    throw new PaymentInitError(
+      "Order total changed. Refresh checkout and try again.",
+    );
   }
 
   const [payment] = await db
@@ -149,6 +170,10 @@ export async function initializeOrderPayment(
       {
         amount: totalCents,
         currency: currency.toLowerCase(),
+        // Let Stripe offer every method the account enables (cards plus
+        // Apple Pay / Google Pay where the device supports them). Redirect
+        // methods stay off: this checkout confirms inline via Elements.
+        automatic_payment_methods: { enabled: true, allow_redirects: "never" },
         metadata: { orderId },
       },
       { idempotencyKey: `checkout-${orderId}` },
@@ -213,7 +238,7 @@ export async function retryOrderPayment(
     userId,
     orderId,
     method,
-    Math.round(Number(order.totalAmount) * 100),
+    toMinorUnits(order.totalAmount, order.currency),
     order.currency,
   );
 }

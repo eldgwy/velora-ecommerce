@@ -5,6 +5,7 @@ import {
   orderNotifications,
   orders,
   orderStatusHistories,
+  payments,
 } from "@/infrastructure/database/schema/orders";
 import {
   canTransitionOrder,
@@ -140,14 +141,44 @@ export async function transitionOrderStatus(
 }
 
 /**
- * Staff/admin fulfillment: PROCESSING → SHIPPED. Inventory was already
- * committed (sold) at payment finalization, so shipment has no inventory
- * effect. Requires a tracking/note reason for the audit trail.
+ * Staff/admin fulfillment: PROCESSING → SHIPPED, plus PENDING → SHIPPED for
+ * unpaid Cash on Delivery orders only. Inventory was already committed
+ * (sold) at payment finalization for card orders, so shipment has no
+ * inventory effect; COD reservations release through the normal
+ * cancellation/expiry paths if the order never ships. Requires a
+ * tracking/note reason for the audit trail.
+ *
+ * The PENDING → SHIPPED edge exists solely because COD orders never pass
+ * through PROCESSING (no Stripe finalization). Card orders reaching this
+ * command while PENDING are rejected: they must be paid first. The payment
+ * precondition is checked under a row lock; the subsequent
+ * `transitionOrderStatus` call re-validates the matrix state, so a concurrent
+ * state change can only fail closed, never slip a card order through.
  */
 export async function shipOrder(
   orderId: string,
   opts: { actorId: string; actorType?: Extract<OrderActor, "staff" | "admin">; correlationId?: string; note?: string },
 ): Promise<void> {
+  const [order] = await db
+    .select({ id: orders.id, status: orders.status })
+    .from(orders)
+    .where(eq(orders.id, orderId));
+  if (!order) throw new OrderNotFoundError(orderId);
+  if (order.status === "PENDING") {
+    const [payment] = await db
+      .select({ provider: payments.provider, status: payments.status })
+      .from(payments)
+      .where(eq(payments.orderId, orderId));
+    if (
+      !payment ||
+      payment.provider !== "cod" ||
+      payment.status !== "PENDING"
+    ) {
+      throw new InvalidOrderTransitionError(
+        "Only unpaid Cash on Delivery orders may ship before payment.",
+      );
+    }
+  }
   const { from } = await transitionOrderStatus(orderId, "SHIPPED", {
     actorType: opts.actorType ?? "staff",
     actorId: opts.actorId,

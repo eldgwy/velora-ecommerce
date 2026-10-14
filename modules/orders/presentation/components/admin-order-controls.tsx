@@ -13,6 +13,7 @@ import {
   deliverOrderAction,
   shipOrderAction,
 } from "@/modules/orders/presentation/actions/admin-order.actions";
+import { collectCodPaymentAction } from "@/modules/payments/presentation/actions/cod.actions";
 import { AdminRefundControl } from "@/modules/orders/presentation/components/admin-refund-control";
 
 /**
@@ -24,10 +25,12 @@ export function AdminOrderControls({
   orderId,
   status,
   paymentStatus,
+  paymentMethod,
 }: {
   orderId: string;
   status: string;
   paymentStatus: string | null;
+  paymentMethod: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -116,6 +119,24 @@ export function AdminOrderControls({
       ) : null}
       {status !== "PENDING" && status !== "PROCESSING" && status !== "SHIPPED" ? (
         <p className="text-xs text-muted-foreground">No further transitions available.</p>
+      ) : null}
+      {paymentMethod === "CASH_ON_DELIVERY" &&
+      paymentStatus === "PENDING" &&
+      (status === "SHIPPED" || status === "DELIVERED") ? (
+        <div className="flex flex-col gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending}
+            onClick={() => run("Cash collection recorded.", () => collectCodPaymentAction(orderId))}
+          >
+            {pending ? <Spinner className="size-4" /> : null}
+            Record cash collected
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Cash on delivery is recorded here only — this never touches card processing.
+          </p>
+        </div>
       ) : null}
       {paymentStatus === "PAID" || paymentStatus === "PARTIALLY_REFUNDED" ? (
         <AdminRefundControl orderId={orderId} />

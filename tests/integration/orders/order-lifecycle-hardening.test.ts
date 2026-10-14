@@ -313,7 +313,19 @@ describe("failure handlers never overwrite captured money", () => {
 
 describe("audit history exactness", () => {
   it("writes no row for rejected transitions", async () => {
-    const { orderId } = await stockedOrder("w1", 1);
+    // Card order: PENDING → SHIPPED must be rejected (skipped payment), so
+    // no audit row is written. Unpaid COD orders ship straight from PENDING
+    // by design — that permitted path is covered by the COD suite.
+    await addItemToCart(
+      { kind: "user", userId: users.w1! },
+      { variantId, quantity: 1 },
+    );
+    const created = await placeOrder(
+      { id: users.w1!, name: "Owner w1", email: `w1-${SFX}@ex.com` },
+      { ...buyInput(), paymentMethod: "card" as const },
+      key(),
+    );
+    const orderId = created.orderId;
     const countBefore = (
       await testDb.select({ id: orderStatusHistories.id }).from(orderStatusHistories).where(eq(orderStatusHistories.orderId, orderId))
     ).length;

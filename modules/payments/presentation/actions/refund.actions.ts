@@ -6,6 +6,7 @@ import { requireAdmin } from "@/shared/lib/guards";
 import { logger } from "@/shared/lib/logging/logger";
 import type { ActionResult } from "@/shared/types/actions";
 import { requestRefund } from "@/modules/payments/application/commands/request-refund";
+import { fromMinorUnits, toMinorUnits } from "@/modules/checkout/domain/money";
 import { dispatchOrderNotification } from "@/modules/notifications/application/order-emails";
 import { InvalidOrderTransitionError } from "@/modules/orders/domain/errors/order-errors";
 import { OrderNotFoundError } from "@/modules/orders/domain/errors/order-errors";
@@ -43,7 +44,7 @@ export async function requestRefundAction(
     const result = await requestRefund({
       orderId: parsed.data.orderId,
       amountCents: parsed.data.amount
-        ? Math.round(Number(parsed.data.amount) * 100)
+        ? toMinorUnits(parsed.data.amount, "USD")
         : undefined,
       reason: parsed.data.reason,
       actorId: session.user.id,
@@ -54,7 +55,7 @@ export async function requestRefundAction(
       ok: true,
       data: {
         refundId: result.refundId,
-        amount: (result.amountCents / 100).toFixed(2),
+        amount: fromMinorUnits(result.amountCents, "USD"),
         status: result.status,
       },
     };

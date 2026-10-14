@@ -344,9 +344,12 @@ describe("staff fulfillment and audit chain", () => {
 
   it("rejects skipped stages and customer fulfillment", async () => {
     await addItemToCart({ kind: "user", userId: users.custB! }, { variantId, quantity: 1 });
+    // Card order: PENDING → SHIPPED skips payment, so shipment must be
+    // rejected (unpaid COD orders are the only PENDING-shippable path, and
+    // COD shipment is covered by the COD suite, not this rejection test).
     const created = await placeOrder(
       { id: users.custB!, name: "Owner custB", email: `custB-${SFX}@ex.com` },
-      buyInput(),
+      { ...buyInput(), paymentMethod: "card" as const },
       key(),
     );
     await expect(shipOrder(created.orderId, { actorId: "s" })).rejects.toBeInstanceOf(

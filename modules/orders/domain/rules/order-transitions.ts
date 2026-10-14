@@ -38,12 +38,17 @@ export interface TransitionRule {
  *   the payment check and points at support-initiated review.
  * - `SHIPPED` / `DELIVERED` advance fulfillment; both are idempotent replays
  *   of the same state (handled by the command, not the matrix).
+ * - `PENDING → SHIPPED` exists ONLY for unpaid Cash on Delivery orders
+ *   (card orders must pass through PROCESSING via verified payment).
+ *   The matrix cannot express payment-method conditions, so `shipOrder`
+ *   additionally verifies provider=cod and payment PENDING under lock.
  */
 export const ORDER_TRANSITIONS: TransitionRule[] = [
   { from: "PENDING", to: "PROCESSING", actors: ["webhook", "system"], event: "payment_succeeded" },
   { from: "PENDING", to: "CANCELLED", actors: ["customer", "staff", "admin", "webhook", "system"], event: "cancelled" },
   { from: "PENDING", to: "CANCELLED", actors: ["webhook", "system"], event: "payment_failed" },
   { from: "PENDING", to: "CANCELLED", actors: ["system"], event: "reservation_expired" },
+  { from: "PENDING", to: "SHIPPED", actors: ["staff", "admin"], event: "shipped_cod" },
   { from: "PROCESSING", to: "SHIPPED", actors: ["staff", "admin"], event: "shipped" },
   { from: "PROCESSING", to: "CANCELLED", actors: ["staff", "admin"], event: "cancelled" },
   { from: "PROCESSING", to: "CANCELLED", actors: ["webhook", "system"], event: "payment_failed" },
