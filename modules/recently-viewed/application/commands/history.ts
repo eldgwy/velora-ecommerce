@@ -91,7 +91,16 @@ export async function mergeGuestHistory(
   entries: Array<{ id: string; at: number }>,
   now: Date = new Date(),
 ): Promise<{ merged: number }> {
-  const ids = [...new Set(entries.map((e) => e.id))].slice(0, HISTORY_LIMIT);
+  // Dedupe first (keeping the newest timestamp per id): the loop below
+  // counts processed ids against HISTORY_LIMIT, so duplicates can neither
+  // exhaust the budget nor inflate the merged count.
+  const newest = new Map<string, number>();
+  for (const entry of entries) {
+    const prev = newest.get(entry.id);
+    const at = typeof entry.at === "number" && Number.isFinite(entry.at) ? entry.at : 0;
+    if (prev === undefined || at > prev) newest.set(entry.id, at);
+  }
+  const ids = [...newest.keys()].slice(0, HISTORY_LIMIT);
   if (ids.length === 0) return { merged: 0 };
   return db.transaction(async (tx) => {
     const rows = await tx
@@ -102,12 +111,12 @@ export async function mergeGuestHistory(
       rows.filter((r) => r.status === "ACTIVE").map((r) => [r.id, r] as const),
     );
     let merged = 0;
-    for (const entry of entries) {
-      if (!viewable.has(entry.id)) continue;
-      const at = new Date(Math.min(entry.at || 0, now.getTime()) || now.getTime());
-      await upsertView(tx, userId, entry.id, Number.isNaN(at.getTime()) ? now : at);
+    for (const id of ids) {
+      if (!viewable.has(id)) continue;
+      const raw = newest.get(id) ?? 0;
+      const at = new Date(Math.min(raw, now.getTime()) || now.getTime());
+      await upsertView(tx, userId, id, Number.isNaN(at.getTime()) ? now : at);
       merged += 1;
-      if (merged >= HISTORY_LIMIT) break;
     }
     await pruneHistory(tx, userId);
     return { merged };

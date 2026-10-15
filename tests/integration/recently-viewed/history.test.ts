@@ -146,6 +146,16 @@ describe("recording and ordering", () => {
     const times = history.items.map((i) => i.viewedAt.getTime());
     expect([...times].sort((a, b) => b - a)).toEqual(times);
   });
+
+  it("orders equal timestamps deterministically across reads", async () => {
+    const at = new Date(Date.now());
+    await recordProductView(userA, productIds[9]!, at);
+    await recordProductView(userA, productIds[10]!, at);
+    const first = await getRecentHistory(userA);
+    const second = await getRecentHistory(userA);
+    expect(first.items.map((i) => i.productId)).toEqual(second.items.map((i) => i.productId));
+    expect(first.items).toHaveLength(2);
+  });
 });
 
 describe("removal and clearing", () => {
@@ -171,8 +181,7 @@ describe("removal and clearing", () => {
   });
 });
 
-describe("guest merge", () => {
-  it("merges validated entries idempotently and skips unknown ids", async () => {
+describe("guest merge", () => {  it("merges validated entries idempotently and skips unknown ids", async () => {
     const now = Date.now();
     const first = await mergeGuestHistory(userA, [
       { id: productIds[3]!, at: now - 1000 },
@@ -199,6 +208,47 @@ describe("guest merge", () => {
     const history = await getRecentHistory(userA);
     expect(history.items[0]!.productId).toBe(productIds[5]);
     expect(history.items[0]!.viewedAt.getTime()).toBeGreaterThanOrEqual(now - 1000);
+  });
+
+  it("merges nothing for all-invalid input and leaves rows untouched", async () => {
+    await recordProductView(userA, productIds[6]!);
+    const before = await getRecentHistory(userA);
+    const res = await mergeGuestHistory(userA, [
+      { id: "00000000-0000-0000-0000-000000000000", at: Date.now() },
+      { id: draftProductId, at: Date.now() },
+    ]);
+    expect(res.merged).toBe(0);
+    expect(await rowCount(userA)).toBe(1);
+    const after = await getRecentHistory(userA);
+    expect(after.items.map((i) => i.productId)).toEqual(before.items.map((i) => i.productId));
+  });
+
+  it("absorbs duplicate-heavy input into one row without cap exhaustion", async () => {
+    const now = Date.now();
+    const dupes = Array.from({ length: 25 }, (_, i) => ({ id: productIds[7]!, at: now - i }));
+    const res = await mergeGuestHistory(userA, [
+      ...dupes,
+      { id: productIds[8]!, at: now },
+    ]);
+    expect(res.merged).toBe(2);
+    expect(await rowCount(userA)).toBe(2);
+  });
+
+  it("prunes only the caller's rows when both customers are at capacity", async () => {
+    const now = Date.now();
+    for (const pid of productIds.slice(0, 20)) {
+      await recordProductView(userA, pid, new Date(now));
+      await recordProductView(userB, pid, new Date(now));
+    }
+    expect(await rowCount(userA)).toBe(20);
+    expect(await rowCount(userB)).toBe(20);
+    // Repeat views refresh without growing either history.
+    await recordProductView(userA, productIds[0]!, new Date(now + 1000));
+    await recordProductView(userB, productIds[0]!, new Date(now + 1000));
+    expect(await rowCount(userA)).toBe(20);
+    expect(await rowCount(userB)).toBe(20);
+    const historyB = await getRecentHistory(userB);
+    expect(historyB.items[0]!.productId).toBe(productIds[0]);
   });
 });
 
