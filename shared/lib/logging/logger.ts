@@ -98,6 +98,9 @@ export const logger = {
     reviewModerated: (reviewId: string, productId: string, fromStatus: string, toStatus: string, userId: string, requestId?: string) =>
       log("info", "Review status changed", { module: "catalog", action: "reviewModerated", reviewId, productId, fromStatus, toStatus, userId, requestId }),
 
+    questionModerated: (questionId: string, productId: string, fromStatus: string, toStatus: string, userId: string, requestId?: string) =>
+      log("info", "Question status changed", { module: "catalog", action: "questionModerated", questionId, productId, fromStatus, toStatus, userId, requestId }),
+
     inventoryAdjusted: (inventoryId: string, variantId: string, type: string, delta: number, userId: string, requestId?: string) =>
       log("info", "Inventory adjusted", { module: "catalog", action: "inventoryAdjusted", inventoryId, variantId, type, delta, userId, requestId }),
   },

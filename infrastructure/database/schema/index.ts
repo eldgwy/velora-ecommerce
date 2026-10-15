@@ -20,6 +20,8 @@ export * from "./orders";
 
 export * from "./returns";
 
+export * from "./product-questions";
+
 export * from "./reviews";
 
 export * from "./discounts";

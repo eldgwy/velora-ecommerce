@@ -23,6 +23,12 @@ export const reviewStatusEnum = pgEnum("review_status", [
   "rejected",
 ]);
 
+export const questionStatusEnum = pgEnum("question_status", [
+  "PENDING",
+  "ANSWERED",
+  "REJECTED",
+]);
+
 export const refundStatusEnum = pgEnum("refund_status", [
   "PENDING",
   "COMPLETED",

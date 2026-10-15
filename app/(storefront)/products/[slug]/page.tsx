@@ -2,6 +2,7 @@ import { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getProductBySlug, getProductReviews } from "@/services/catalog-public";
 import { ProductReviewSection } from "@/modules/reviews/presentation/components/review-section";
+import { ProductQuestionSection } from "@/modules/product-questions/presentation/components/question-section";
 import { getVariantPromotionViews } from "@/modules/promotions/application/queries/promotion-pricing";
 import { fromMinorUnits } from "@/modules/checkout/domain/money";
 import Link from "next/link";
@@ -14,7 +15,7 @@ import { formatPrice } from "@/shared/lib/utils";
 
 interface ProductPageProps {
   params: Promise<{ slug: string }>;
-  searchParams?: Promise<{ reviewsPage?: string }>;
+  searchParams?: Promise<{ reviewsPage?: string; questionsPage?: string }>;
 }
 
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
@@ -42,6 +43,7 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
 
   const search = (await searchParams) ?? {};
   const reviewsPage = Math.max(1, parseInt(search.reviewsPage ?? "1", 10) || 1);
+  const questionsPage = Math.max(1, parseInt(search.questionsPage ?? "1", 10) || 1);
 
   const primaryImage = product.images.find((i) => i.isPrimary) ?? product.images[0];
 
@@ -226,6 +228,14 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
             productId={product.id}
             signedIn={session !== null}
             page={reviewsPage}
+          />
+        </div>
+
+        <div className="py-6 border-t">
+          <ProductQuestionSection
+            productId={product.id}
+            signedIn={session !== null}
+            page={questionsPage}
           />
         </div>
 
