@@ -7,11 +7,12 @@ import {
   percentOfCents,
 } from "@/modules/checkout/domain/calculation";
 
-const line = (over: Partial<{ variantId: string; quantity: number; unitPriceCents: number; discountPerUnitCents: number }> = {}) => ({
+const line = (over: Partial<{ variantId: string; quantity: number; unitPriceCents: number; discountPerUnitCents: number; listPriceCents: number }> = {}) => ({
   variantId: "v1",
   quantity: 2,
   unitPriceCents: 1800,
   discountPerUnitCents: 200,
+  listPriceCents: 2000,
   ...over,
 });
 
@@ -52,7 +53,7 @@ describe("checkout totals engine (BR-002)", () => {
   it("prices multiple lines with stacking promo-then-coupon", () => {
     const totals = calculateCheckoutTotals(
       base({
-        lines: [line(), line({ variantId: "v2", quantity: 1, unitPriceCents: 2250, discountPerUnitCents: 250 })],
+        lines: [line(), line({ variantId: "v2", quantity: 1, unitPriceCents: 2250, discountPerUnitCents: 250, listPriceCents: 2500 })],
         couponDiscountCents: 500,
       }),
     );
@@ -128,5 +129,25 @@ describe("checkout totals engine (BR-002)", () => {
       calculateCheckoutTotals(base({ lines: [line({ discountPerUnitCents: 1801 })] })),
     ).toThrow();
     expect(calculateCheckoutTotals(base({ lines: [] })).totalCents).toBe(499);
+  });
+
+  it("prices fully-discounted lines with list-price consistency", () => {
+    // 100% promotion: saving equals the list price, effective is zero.
+    const totals = calculateCheckoutTotals(
+      base({
+        lines: [line({ quantity: 3, unitPriceCents: 0, discountPerUnitCents: 2000, listPriceCents: 2000 })],
+      }),
+    );
+    expect(totals.subtotalCents).toBe(0);
+    expect(totals.promotionDiscountCents).toBe(6000);
+    expect(totals.totalCents).toBe(499);
+    // Saving above list, or an effective price that is not list − saving,
+    // is an inconsistent caller and fails loudly.
+    expect(() =>
+      calculateCheckoutTotals(base({ lines: [line({ discountPerUnitCents: 2001 })] })),
+    ).toThrow(/unit promotion/);
+    expect(() =>
+      calculateCheckoutTotals(base({ lines: [line({ unitPriceCents: 1700 })] })),
+    ).toThrow(/unit price/);
   });
 });

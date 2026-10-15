@@ -28,8 +28,13 @@ export const metadata: Metadata = {
 };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
+    // suppressHydrationWarning: next-themes' blocking script sets the theme
+    // class and color-scheme on <html> before React hydrates (official
+    // next-themes remedy — the attributes intentionally differ pre/post
+    // hydration and must not be patched).
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${displayFont.variable} ${sansFont.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">

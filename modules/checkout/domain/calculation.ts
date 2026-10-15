@@ -43,6 +43,8 @@ export interface EngineLine {
   unitPriceCents: number;
   /** Promotion saving per unit embedded in the effective price. */
   discountPerUnitCents: number;
+  /** Authoritative pre-promotion unit price: effective + saving, exactly. */
+  listPriceCents: number;
 }
 
 export interface EngineInput {
@@ -167,7 +169,15 @@ export function calculateCheckoutTotals(input: EngineInput): TotalsBreakdown {
     if (!Number.isSafeInteger(line.quantity) || line.quantity < 0) fail("quantity");
     assertNonNegativeMinorUnits(line.unitPriceCents, "unit price");
     assertNonNegativeMinorUnits(line.discountPerUnitCents, "unit promotion");
-    if (line.discountPerUnitCents > line.unitPriceCents) fail("unit promotion");
+    assertNonNegativeMinorUnits(line.listPriceCents, "list price");
+    // The promotion saving comes out of the list price — never more, and
+    // the effective price is exactly the remainder. A 100%-off line has
+    // saving == list with a zero effective price (legal); anything else is
+    // an inconsistent caller.
+    if (line.discountPerUnitCents > line.listPriceCents) fail("unit promotion");
+    if (line.unitPriceCents !== line.listPriceCents - line.discountPerUnitCents) {
+      fail("unit price");
+    }
     const lineSubtotalCents = line.unitPriceCents * line.quantity;
     if (!Number.isSafeInteger(lineSubtotalCents)) fail("line subtotal");
     return {

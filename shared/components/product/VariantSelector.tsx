@@ -34,6 +34,16 @@ interface Product {
 
 interface VariantSelectorProps {
   product: Product;
+  /** Precomputed promotion views by variant id (server-side, authoritative). */
+  promotionViews?: Record<
+    string,
+    {
+      effectivePrice: string;
+      listPrice: string;
+      promotionName: string | null;
+      endsAt: string | null;
+    }
+  >;
 }
 
 function findMatchingVariant(
@@ -62,7 +72,7 @@ function findMatchingVariant(
   );
 }
 
-export function VariantSelector({ product }: VariantSelectorProps) {
+export function VariantSelector({ product, promotionViews }: VariantSelectorProps) {
   const [selectedValues, setSelectedValues] = useState<Record<string, string>>({});
 
   const resolvedVariant = useMemo(
@@ -77,9 +87,14 @@ export function VariantSelector({ product }: VariantSelectorProps) {
 
   const availableStock = resolvedVariant?.availableStock ?? 0;
   const isInStock = availableStock > 0;
-  const displayPrice = resolvedVariant
+  const listPrice = resolvedVariant
     ? resolvedVariant.priceOverride ?? product.basePrice
     : product.basePrice;
+  const promoView = resolvedVariant ? promotionViews?.[resolvedVariant.id] : undefined;
+  const displayPrice = promoView?.effectivePrice ?? listPrice;
+  const showPromoStrike =
+    promoView !== undefined &&
+    Number(promoView.effectivePrice) < Number(promoView.listPrice);
 
   const handleSelectValue = (optionId: string, valueId: string) => {
     setSelectedValues((prev) => ({ ...prev, [optionId]: valueId }));
@@ -142,6 +157,19 @@ export function VariantSelector({ product }: VariantSelectorProps) {
 
           <div className="flex items-center gap-4">
             <span className="text-2xl font-bold">{formatPrice(displayPrice)}</span>
+            {showPromoStrike ? (
+              <span className="text-lg line-through text-muted-foreground">
+                {formatPrice(promoView!.listPrice)}
+              </span>
+            ) : null}
+            {showPromoStrike && promoView!.promotionName ? (
+              <span
+                className="rounded-full bg-secondary px-2.5 py-1 text-[11px] font-medium"
+                title={`Promotion: ${promoView!.promotionName}`}
+              >
+                Sale
+              </span>
+            ) : null}
             {product.comparePrice && Number(product.comparePrice) > Number(product.basePrice) && (
               <span className="text-lg line-through text-muted-foreground">{formatPrice(product.comparePrice)}</span>
             )}

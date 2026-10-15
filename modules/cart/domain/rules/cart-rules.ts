@@ -75,21 +75,19 @@ export function subtotalCents(
   );
 }
 
+import { applyPromotionToUnitPriceCents } from "@/modules/promotions/domain/promotion-rules";
+
 export type PromotionKind = "PERCENTAGE" | "FIXED";
 
 /**
  * Apply one active promotion to a unit price (discount precedence BR-009:
  * promotions adjust the unit price before any coupon math, which lives in
- * checkout — not here).
+ * checkout — not here). Exact-decimal implementation lives in the
+ * promotions domain; this wrapper preserves the established import path.
  */
 export function applyPromotionToUnitPrice(
   unitPriceCents: number,
   promotion: { type: PromotionKind; value: string | number },
 ): number {
-  if (promotion.type === "PERCENTAGE") {
-    const pct = Number(promotion.value);
-    if (!Number.isFinite(pct) || pct <= 0) return unitPriceCents;
-    return Math.max(0, Math.round(unitPriceCents * (1 - pct / 100)));
-  }
-  return Math.max(0, unitPriceCents - toCents(promotion.value));
+  return applyPromotionToUnitPriceCents(unitPriceCents, promotion);
 }

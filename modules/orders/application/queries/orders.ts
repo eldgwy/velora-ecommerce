@@ -42,6 +42,10 @@ export interface OrderDetailItem {
   discountAmount: string | null;
   lineTotal: string | null;
   reservationStatus: string;
+  /** Frozen promotion snapshot (null on pre-policy rows = unknown). */
+  regularUnitPrice: string | null;
+  promotionId: string | null;
+  promotionName: string | null;
 }
 
 export interface OrderDetailAddress {
@@ -286,6 +290,9 @@ export async function getOrderDetail(
       discountAmount: i.discountAmount,
       lineTotal: i.totalAmount,
       reservationStatus: i.reservationStatus,
+      regularUnitPrice: i.regularUnitPrice,
+      promotionId: i.promotionId,
+      promotionName: i.promotionName,
     })),
     addresses: addresses.map((a) => ({
       type: a.type,

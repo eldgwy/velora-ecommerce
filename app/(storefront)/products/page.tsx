@@ -1,5 +1,7 @@
 import { Metadata } from "next";
 import { searchProducts, getActiveBrands, getCategoryTree } from "@/services/catalog-public";
+import { getProductPromotionSummaries } from "@/modules/promotions/application/queries/promotion-pricing";
+import { fromMinorUnits } from "@/modules/checkout/domain/money";
 import Link from "next/link";
 import { getCurrentSession } from "@/shared/lib/guards";
 import { getSavedProductIds } from "@/modules/wishlist/application/queries/wishlist";
@@ -55,6 +57,12 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
         productsResult.items.map((p) => p.id),
       )
     : new Set<string>();
+
+  // One batched promotion lookup for the whole grid (no per-card queries).
+  // Display-only: checkout revalidates and charges from the same rules.
+  const promoSummaries = await getProductPromotionSummaries(
+    productsResult.items.map((p) => p.id),
+  );
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -218,6 +226,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
                   key={product.id}
                   product={product}
                   initialSaved={savedIds.has(product.id)}
+                  promotion={promoSummaries.get(product.id) ?? null}
                 />
               ))}
             </div>
@@ -287,10 +296,24 @@ function CategoryFilterLink({
 function ProductCard({
   product,
   initialSaved,
+  promotion,
 }: {
   product: Awaited<ReturnType<typeof searchProducts>>["items"][0];
   initialSaved: boolean;
+  promotion: {
+    minEffectiveCents: number | null;
+    hasDiscount: boolean;
+    promotionName: string | null;
+  } | null;
 }) {
+  const listFrom =
+    product.minVariantPrice ?? product.basePrice;
+  // Effective "from" price; struck-through only when actually lower.
+  const promoFrom =
+    promotion?.hasDiscount && promotion.minEffectiveCents !== null
+      ? fromMinorUnits(promotion.minEffectiveCents, "USD")
+      : null;
+  const showPromo = promoFrom !== null && Number(promoFrom) < Number(listFrom);
   return (
     <div className="group relative">
       <Link href={`/products/${product.slug}`} className="block">
@@ -315,7 +338,18 @@ function ProductCard({
         <div className="mt-3 space-y-1">
           <h3 className="font-medium line-clamp-1 group-hover:text-primary transition-colors">{product.name}</h3>
           <div className="flex items-center gap-2">
-            <span className="text-lg font-semibold">{formatPrice(product.minVariantPrice ?? product.basePrice)}</span>
+            <span className="text-lg font-semibold">{formatPrice(showPromo ? promoFrom! : listFrom)}</span>
+            {showPromo ? (
+              <span className="text-sm line-through text-muted-foreground">{formatPrice(listFrom)}</span>
+            ) : null}
+            {showPromo ? (
+              <span
+                className="rounded-full bg-secondary px-2 py-0.5 text-[11px] font-medium"
+                title={promotion?.promotionName ?? undefined}
+              >
+                Sale
+              </span>
+            ) : null}
             {product.comparePrice && Number(product.comparePrice) > Number(product.basePrice) && (
               <span className="text-sm line-through text-muted-foreground">{formatPrice(product.comparePrice)}</span>
             )}

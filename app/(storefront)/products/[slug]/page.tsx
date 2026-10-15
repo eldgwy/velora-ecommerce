@@ -1,8 +1,11 @@
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getProductBySlug, getProductReviews } from "@/services/catalog-public";
+import { getVariantPromotionViews } from "@/modules/promotions/application/queries/promotion-pricing";
+import { fromMinorUnits } from "@/modules/checkout/domain/money";
 import Link from "next/link";
 import VariantSelector from "@/shared/components/product/VariantSelector";
+import { PromotionPrice } from "@/shared/components/product/PromotionPrice";
 import { WishlistToggle } from "@/modules/wishlist/presentation/components/WishlistToggle";
 import { getSavedProductIds } from "@/modules/wishlist/application/queries/wishlist";
 import { getCurrentSession } from "@/shared/lib/guards";
@@ -45,6 +48,34 @@ async function ProductContent({ params }: ProductPageProps) {
   const savedIds = session
     ? await getSavedProductIds(session.user.id, [product.id])
     : new Set<string>();
+
+  // Authoritative promotion views, batched per product (never per variant).
+  // Display-only: checkout revalidates and charges from the same rules.
+  const promoViews = await getVariantPromotionViews(
+    product.variants.map((v) => ({
+      variantId: v.id,
+      productId: product.id,
+      listPrice: v.priceOverride ?? product.basePrice,
+      purchasable: v.status === "ACTIVE" && product.status === "ACTIVE",
+    })),
+  );
+  const discounted = [...promoViews.values()].filter((v) => v.savingCents > 0);
+  const bestView =
+    discounted.length > 0
+      ? discounted.reduce((a, b) => (b.effectiveCents < a.effectiveCents ? b : a))
+      : null;
+  const selectorViews: Record<
+    string,
+    { effectivePrice: string; listPrice: string; promotionName: string | null; endsAt: string | null }
+  > = {};
+  for (const [variantId, view] of promoViews) {
+    selectorViews[variantId] = {
+      effectivePrice: fromMinorUnits(view.effectiveCents, "USD"),
+      listPrice: fromMinorUnits(view.listPriceCents, "USD"),
+      promotionName: view.promotionName,
+      endsAt: view.promotionEndsAt ? view.promotionEndsAt.toISOString() : null,
+    };
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -116,7 +147,18 @@ async function ProductContent({ params }: ProductPageProps) {
           )}
 
           <div className="flex items-center gap-4">
-            <span className="text-3xl font-bold">{formatPrice(product.basePrice)}</span>
+            {bestView ? (
+              <PromotionPrice
+                listPrice={fromMinorUnits(bestView.listPriceCents, "USD")}
+                effectivePrice={fromMinorUnits(bestView.effectiveCents, "USD")}
+                promotionName={bestView.promotionName}
+                endsAt={bestView.promotionEndsAt?.toISOString() ?? null}
+                size="lg"
+                badgeLabel={bestView.promotionName ?? "Sale"}
+              />
+            ) : (
+              <span className="text-3xl font-bold">{formatPrice(product.basePrice)}</span>
+            )}
             {product.comparePrice && Number(product.comparePrice) > Number(product.basePrice) && (
               <span className="text-xl line-through text-muted-foreground">{formatPrice(product.comparePrice)}</span>
             )}
@@ -130,7 +172,7 @@ async function ProductContent({ params }: ProductPageProps) {
 
           {/* Variant Selection */}
           {product.variants.length > 0 && (
-            <VariantSelector key={product.id} product={product} />
+            <VariantSelector key={product.id} product={product} promotionViews={selectorViews} />
           )}
 
           {/* Add to Cart */}

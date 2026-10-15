@@ -172,6 +172,15 @@ export const orderItems = pgTable(
 
     totalAmount: numeric("total_amount"),
 
+    // Promotion snapshot (migration 0023): the regular list price before
+    // the promotion plus the promotion's historical name. Together with
+    // unit_price (effective), discount_amount (saving), and promotion_id,
+    // the line explains itself after the promotion changes. NULL on
+    // pre-policy rows means "unknown", never fabricated.
+    regularUnitPrice: numeric("regular_unit_price"),
+
+    promotionName: text("promotion_name"),
+
     // Promotion applied to this line, if any. Deliberately no foreign key:
     // promotions are deletable and the snapshot must survive them.
     promotionId: uuid("promotion_id"),

@@ -82,8 +82,9 @@ TotalAmount    = Subtotal − DiscountAmount + ShippingAmount + TaxAmount
 1. Product promotions adjust the effective unit price first.
 2. At most one coupon applies, computed on the discounted merchandise
    subtotal only — never on shipping or tax.
-3. The same promotion is applied once per line (best-active-promotion
-   resolution); coupon usage is locked (`FOR UPDATE`), consumed in Tx1, and
+3. The same promotion is applied once per line (deterministic
+   best-promotion selection — lowest effective price, id tie-break — in
+   `modules/promotions/domain/promotion-rules.ts`; see `docs/promotions.md`); coupon usage is locked (`FOR UPDATE`), consumed in Tx1, and
    rolled back on compensation. Concurrent checkouts for the last usage
    serialize: exactly one wins.
 4. Discounts can never drive the merchandise base negative (coupon capped at
@@ -132,7 +133,8 @@ see `docs/coupons.md`. Remaining gap: none on per-user accounting.
 
 ## Order snapshot semantics
 
-Tx1 persists: lines (variant, qty, frozen unit/discount/total, `promotion_id`
+Tx1 persists: lines (variant, qty, frozen regular/effective unit prices,
+promotion discount/total, `promotion_id` + `promotion_name` snapshot
 — plain reference, no FK so snapshots survive promotion deletion), order
 aggregates, `shipping_method`, `tax_jurisdiction`/`tax_rate_bps`/`taxable_base`,
 `pricingPolicyVersion`, both address snapshots, payment row, history row,

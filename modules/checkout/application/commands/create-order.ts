@@ -442,6 +442,8 @@ interface BillableLine {
   unitPriceCents: number;
   discountPerUnitCents: number;
   promotionId: string | null;
+  promotionName: string | null;
+  listPriceCents: number;
   weightGrams: number | null;
 }
 
@@ -486,6 +488,8 @@ async function revalidateLines(
       unitPriceCents,
       discountPerUnitCents: entry.discountPerUnitCents,
       promotionId: entry.promotion?.id ?? null,
+      promotionName: entry.promotion?.name ?? null,
+      listPriceCents: toMinorUnits(entry.listPrice, CHECKOUT_CURRENCY),
       weightGrams: entry.weightGrams,
     });
     items.push({ variantId: line.variantId, inStock: true });
@@ -593,6 +597,7 @@ async function createOrderTx(
             quantity: l.quantity,
             unitPriceCents: l.unitPriceCents,
             discountPerUnitCents: l.discountPerUnitCents,
+            listPriceCents: l.listPriceCents,
           })),
           couponDiscountCents: coupon?.discountCents ?? 0,
           shippingMethod: input.shippingMethod,
@@ -658,6 +663,11 @@ async function createOrderTx(
               CHECKOUT_CURRENCY,
             ),
             promotionId: line.promotionId,
+            // Frozen promotion snapshot: regular price + historical name
+            // travel with the effective price so the line explains itself
+            // after the promotion changes.
+            regularUnitPrice: fromMinorUnits(line.listPriceCents, CHECKOUT_CURRENCY),
+            promotionName: line.promotionName,
           });
         }
 

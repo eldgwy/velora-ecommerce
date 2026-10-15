@@ -20,6 +20,7 @@ import {
   applyPromotionToUnitPrice,
   toCents,
 } from "@/modules/cart/domain/rules/cart-rules";
+import { selectBestPromotion } from "@/modules/promotions/domain/promotion-rules";
 
 // ---------------------------------------------------------------------------
 // Owner
@@ -196,9 +197,11 @@ export async function resolveCatalogEntry(
 }
 
 /**
- * Best currently-active promotion mapped to the product, ranked by absolute
- * per-unit saving against the live list price. Returns null when none
- * applies (inactive, not started, or ended). `endsAt = NULL` is open-ended.
+ * Best currently-active promotion mapped to the product, via the centralized
+ * deterministic selection (lowest effective price, id tie-break). Returns
+ * null when none applies (inactive, not started, or ended) or when no
+ * candidate yields a positive saving. `endsAt = NULL` is open-ended.
+ * Rows arrive ordered by id so every caller sees the same candidate order.
  */
 async function getBestActivePromotion(
   productId: string,
@@ -224,25 +227,16 @@ async function getBestActivePromotion(
         eq(promotions.isActive, true),
         lte(promotions.startsAt, now),
       ),
-    );
+    )
+    .orderBy(promotions.id);
 
   const nowMs = now.getTime();
-  let winner: CatalogEntry["promotion"] = null;
-  let winnerSaving = 0;
-  for (const row of rows) {
-    if (row.endsAt !== null && row.endsAt.getTime() < nowMs) continue;
-    const saving =
-      listPriceCents -
-      applyPromotionToUnitPrice(listPriceCents, {
-        type: row.type,
-        value: row.value,
-      });
-    if (saving > winnerSaving) {
-      winnerSaving = saving;
-      winner = { id: row.id, name: row.name, type: row.type, value: row.value };
-    }
-  }
-  return winner;
+  const eligible = rows.filter(
+    (row) => row.endsAt === null || row.endsAt.getTime() >= nowMs,
+  );
+  const winner = selectBestPromotion(listPriceCents, eligible);
+  if (!winner) return null;
+  return { id: winner.id, name: winner.name, type: winner.type, value: winner.value };
 }
 
 /** Find an ACTIVE cart id for the owner, or null. */

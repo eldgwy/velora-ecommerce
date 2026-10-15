@@ -1,5 +1,7 @@
 import { StaticImageData } from 'next/image'
 
+const IMAGE_PATH='@/shared/images'
+
 export type Product = {
   id: number,
   title: string,
@@ -55,7 +57,7 @@ export const Products: Product[] = [
     price: 150,
     description: "The Best Product 1",
     category: 'Jackets',
-    image: '/images/products/product1.jpg',
+    image: `${IMAGE_PATH}/products/product1.jpg`,
     stars: 4
   },
   {
@@ -64,7 +66,7 @@ export const Products: Product[] = [
     price: 250,
     description: "The Best Product 2",
     category: 'Clothes',
-    image: '/images/products/product2.jpg',
+    image: `${IMAGE_PATH}/products/product2.jpg`,
     stars: 4.5
   },
   {
@@ -73,7 +75,7 @@ export const Products: Product[] = [
     price: 300,
     description: "The Best Product 3",
     category: 'Clothes',
-    image: '/images/products/product3.jpg',
+    image: `${IMAGE_PATH}/products/product3.jpg`,
     stars: 5
   },
   {
@@ -82,7 +84,7 @@ export const Products: Product[] = [
     price: 200,
     description: "The Best Product 4",
     category: 'Jackets',
-    image: '/images/products/product4.jpg',
+    image: `${IMAGE_PATH}/products/product4.jpg`,
     stars: 3.5
   },
   {
@@ -91,7 +93,7 @@ export const Products: Product[] = [
     price: 350,
     description: "The Best Product 5",
     category: 'Bags',
-    image: '/images/products/product5.jpg',
+    image: `${IMAGE_PATH}/products/product5.jpg`,
     stars: 3
   },
   {
@@ -100,7 +102,7 @@ export const Products: Product[] = [
     price: 450,
     description: "The Best Product 6",
     category: 'Clothes',
-    image: '/images/products/product6.jpg',
+    image: `${IMAGE_PATH}/products/product6.jpg`,
     stars: 4
   },
 ]
@@ -109,21 +111,21 @@ export const categories = [
   {
     name: "Women",
     slug: "women",
-    image: '/images/categories/women.jpg',
+    image: `${IMAGE_PATH}/categories/women.jpg`,
   },
   {
     name: "Men",
     slug: "men",
-    image: '/images/categories/men.jpg',
+    image: `${IMAGE_PATH}/categories/men.jpg`,
   },
   {
     name: "Accessories",
     slug: "accessories",
-    image: '/images/categories/accessories.jpg',
+    image: `${IMAGE_PATH}/categories/accessories.jpg`,
   },
   {
     name: "New Arrivals",
     slug: "new-arrivals",
-    image: '/images/categories/newArrivals.jpg',
+    image: `${IMAGE_PATH}/categories/newArrivals.jpg`,
   },
 ];

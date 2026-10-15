@@ -81,6 +81,7 @@ export async function previewCheckout(
     quantity: number;
     unitPriceCents: number;
     discountPerUnitCents: number;
+    listPriceCents: number;
     promotionId: string | null;
     weightGrams: number | null;
   }> = [];
@@ -106,6 +107,7 @@ export async function previewCheckout(
       quantity: row.quantity,
       unitPriceCents: toMinorUnits(entry.effectivePrice, CHECKOUT_CURRENCY),
       discountPerUnitCents: entry.discountPerUnitCents,
+      listPriceCents: toMinorUnits(entry.listPrice, CHECKOUT_CURRENCY),
       promotionId: entry.promotion?.id ?? null,
       weightGrams: entry.weightGrams,
     });
