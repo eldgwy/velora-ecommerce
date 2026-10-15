@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { requireAdmin } from "@/shared/lib/guards";
 import {
+  getReviewById,
   moderateReview,
   ReviewNotFoundError,
   type ReviewStatus,
@@ -26,6 +27,19 @@ export async function moderateReviewAction(
   }
 
   try {
+    // Queue policy: only PENDING reviews may be moderated here. Rejected
+    // reviews stay excluded permanently in this scope; the underlying
+    // service's re-evaluation ability is intentionally not exposed.
+    const current = await getReviewById(parsed.data.reviewId);
+    if (!current) {
+      return { error: "Review not found." };
+    }
+    if (current.status !== "pending") {
+      return {
+        error: `This review has already been moderated (${current.status}).`,
+      };
+    }
+
     const result = await moderateReview(
       parsed.data.reviewId,
       parsed.data.status,

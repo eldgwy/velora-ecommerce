@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -8,6 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import { reviewStatusEnum } from "./enums";
 import { user } from "./auth";
@@ -39,7 +41,14 @@ export const reviews = pgTable(
 
     content: text("content"),
 
-    status: reviewStatusEnum("status"),
+    status: reviewStatusEnum("status").default("pending"),
+
+    // Server-determined at submission: the author holds a DELIVERED order
+    // containing this product. The public badge renders only for
+    // APPROVED + verified rows; never client-supplied.
+    isVerifiedBuyer: boolean("is_verified_buyer")
+      .notNull()
+      .default(false),
 
     createdAt: timestamp("created_at", {
       mode: "date",
@@ -57,6 +66,21 @@ export const reviews = pgTable(
     uniqueIndex("reviews_user_product_unique").on(
       table.userId,
       table.productId,
+    ),
+
+    check(
+      "reviews_rating_range",
+      sql`"rating" IS NULL OR ("rating" >= 1 AND "rating" <= 5)`,
+    ),
+
+    check(
+      "reviews_title_length",
+      sql`"title" IS NULL OR char_length("title") BETWEEN 1 AND 120`,
+    ),
+
+    check(
+      "reviews_content_length",
+      sql`"content" IS NULL OR char_length("content") BETWEEN 1 AND 5000`,
     ),
 
     index("reviews_product_id_idx").on(
