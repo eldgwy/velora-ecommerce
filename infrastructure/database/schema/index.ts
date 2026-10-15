@@ -22,6 +22,8 @@ export * from "./returns";
 
 export * from "./product-questions";
 
+export * from "./browsing-history";
+
 export * from "./reviews";
 
 export * from "./discounts";

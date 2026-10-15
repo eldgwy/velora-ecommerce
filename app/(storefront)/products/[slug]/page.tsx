@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import { getProductBySlug, getProductReviews } from "@/services/catalog-public";
 import { ProductReviewSection } from "@/modules/reviews/presentation/components/review-section";
 import { ProductQuestionSection } from "@/modules/product-questions/presentation/components/question-section";
+import { RecordProductView } from "@/modules/recently-viewed/presentation/components/record-view";
+import { RecentViewsSection } from "@/modules/recently-viewed/presentation/components/recent-views-section";
+import { GuestRecentViews } from "@/modules/recently-viewed/presentation/components/guest-recent-views";
 import { getVariantPromotionViews } from "@/modules/promotions/application/queries/promotion-pricing";
 import { fromMinorUnits } from "@/modules/checkout/domain/money";
 import Link from "next/link";
@@ -237,6 +240,15 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
             signedIn={session !== null}
             page={questionsPage}
           />
+        </div>
+
+        <div className="py-6 border-t">
+          <RecordProductView productId={product.id} signedIn={session !== null} />
+          {session ? (
+            <RecentViewsSection userId={session.user.id} currentProductId={product.id} />
+          ) : (
+            <GuestRecentViews currentProductId={product.id} />
+          )}
         </div>
 
         {/* Reviews Section */}
