@@ -1,5 +1,6 @@
 import {
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -8,6 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import { bannerStatusEnum } from "./enums";
 import { products } from "./catalog";
@@ -48,6 +50,21 @@ export const collections = pgTable(
   (table) => [
     uniqueIndex("collections_slug_unique").on(
       table.slug,
+    ),
+
+    check(
+      "collections_name_length",
+      sql`char_length("name") BETWEEN 1 AND 120`,
+    ),
+
+    check(
+      "collections_slug_format",
+      sql`char_length("slug") BETWEEN 3 AND 64 AND "slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`,
+    ),
+
+    check(
+      "collections_description_length",
+      sql`"description" IS NULL OR char_length("description") <= 2000`,
     ),
 
     index("collections_is_active_idx").on(

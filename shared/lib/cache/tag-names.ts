@@ -27,6 +27,9 @@ export const cacheTags = {
     imagesByProduct: (productId: string) => `images:product:${productId}`,
     image: (id: string) => `image:${id}`,
 
+    // Collections
+    collectionsList: "collections:list",
+    collection: (slug: string) => `collection:${slug}`,
     // Cart (dynamic per owner; invalidated after every cart DB commit)
     cart: (cartId: string) => `cart:${cartId}`,
     userCart: (userId: string) => `cart:user:${userId}`,

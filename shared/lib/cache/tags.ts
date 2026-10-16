@@ -66,6 +66,16 @@ export async function invalidateReviewCache(productId: string): Promise<void> {
 }
 
 /**
+ * Invalidate collection caches after metadata, publication, cover-image,
+ * product-mapping, or ordering changes. Public collection pages refresh
+ * from these tags; product detail data is untouched.
+ */
+export async function invalidateCollectionCache(slug?: string): Promise<void> {
+  updateTag(cacheTags.collectionsList);
+  if (slug) updateTag(cacheTags.collection(slug));
+}
+
+/**
  * Invalidate cache for product images.
  */
 export async function invalidateImageCache(imageId: string, productId: string): Promise<void> {
