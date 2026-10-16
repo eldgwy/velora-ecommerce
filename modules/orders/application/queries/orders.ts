@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
+import { user } from "@/infrastructure/database/schema/auth";
 import {
   orderAddresses,
   orderItems,
@@ -21,6 +22,8 @@ export interface OrderListItem {
   createdAt: Date;
   /** Populated for staff views only. */
   userId?: string;
+  /** Customer display name (staff views only; null when unknown). */
+  customerName?: string | null;
 }
 
 export interface PaginatedOrders {
@@ -168,6 +171,13 @@ export async function listCustomerOrders(
 export interface AdminOrderFilters {
   status?: string;
   paymentStatus?: string;
+  /** Case-insensitive customer name fragment (matches user name). */
+  customer?: string;
+  /** Exact order number match (normalized uppercase, trimmed). */
+  orderNumber?: string;
+  /** UTC day walls, half-open [from, to) on created_at. */
+  from?: Date;
+  to?: Date;
   page?: number;
   pageSize?: number;
 }
@@ -183,7 +193,20 @@ export async function listOrdersForAdmin(filters: AdminOrderFilters = {}): Promi
   if (filters.paymentStatus) {
     conditions.push(eq(orders.paymentStatus, filters.paymentStatus as NonNullable<typeof orders.paymentStatus.enumValues>[number]));
   }
+  if (filters.orderNumber && filters.orderNumber.trim() !== "") {
+    conditions.push(eq(orders.orderNumber, filters.orderNumber.trim().toUpperCase()));
+  }
+  if (filters.from) {
+    conditions.push(sql`${orders.createdAt} >= ${filters.from.toISOString()}`);
+  }
+  if (filters.to) {
+    conditions.push(sql`${orders.createdAt} < ${filters.to.toISOString()}`);
+  }
+  if (filters.customer && filters.customer.trim() !== "") {
+    conditions.push(ilike(user.name, `%${filters.customer.trim()}%`));
+  }
 
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
   const rows = await db
     .select({
       id: orders.id,
@@ -194,9 +217,11 @@ export async function listOrdersForAdmin(filters: AdminOrderFilters = {}): Promi
       currency: orders.currency,
       createdAt: orders.createdAt,
       userId: orders.userId,
+      customerName: user.name,
     })
     .from(orders)
-    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .leftJoin(user, eq(user.id, orders.userId))
+    .where(where)
     .orderBy(desc(orders.createdAt), desc(orders.id))
     .limit(limit)
     .offset(offset);
@@ -204,7 +229,8 @@ export async function listOrdersForAdmin(filters: AdminOrderFilters = {}): Promi
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(orders)
-    .where(conditions.length > 0 ? and(...conditions) : undefined);
+    .leftJoin(user, eq(user.id, orders.userId))
+    .where(where);
 
   const itemCounts = rows.length > 0
     ? await db
@@ -320,4 +346,120 @@ export async function getOrderDetail(
     cancellable,
     paidBeyondCancel,
   };
+}
+
+export interface ManifestItem {
+  productName: string | null;
+  variantName: string | null;
+  sku: string;
+  quantity: number;
+}
+
+export interface ManifestOrder {
+  orderId: string;
+  orderNumber: string;
+  status: string;
+  customerName: string | null;
+  address: {
+    firstName: string | null;
+    lastName: string | null;
+    phone: string | null;
+    country: string | null;
+    city: string | null;
+    state: string | null;
+    postalCode: string | null;
+    addressLine1: string | null;
+    addressLine2: string | null;
+  } | null;
+  items: ManifestItem[];
+  notes: string | null;
+}
+
+export interface ShippingManifest {
+  included: ManifestOrder[];
+  /** Selected ids refused with the reason (ineligible status, missing). */
+  excluded: Array<{ orderId: string; reason: string }>;
+}
+
+/** Manifest-eligible states: shippable or already in transit. */
+const MANIFEST_STATUSES = ["PROCESSING", "SHIPPED"];
+
+/**
+ * Shipping manifest data for explicitly selected orders. Every id is
+ * re-validated server-side: only PROCESSING/SHIPPED orders are included,
+ * everything else is reported in `excluded` with its reason. Address and
+ * line data come from persisted snapshots; no payment secrets, no
+ * credentials, no unrelated PII.
+ */
+export async function getShippingManifest(orderIds: string[]): Promise<ShippingManifest> {
+  const ids = [...new Set(orderIds)].slice(0, 50);
+  const included: ManifestOrder[] = [];
+  const excluded: Array<{ orderId: string; reason: string }> = [];
+  if (ids.length === 0) return { included, excluded };
+
+  const rows = await db
+    .select({
+      id: orders.id,
+      orderNumber: orders.orderNumber,
+      status: orders.status,
+      notes: orders.notes,
+      customerName: user.name,
+    })
+    .from(orders)
+    .leftJoin(user, eq(user.id, orders.userId))
+    .where(inArray(orders.id, ids));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  for (const id of ids) {
+    const order = byId.get(id);
+    if (!order) {
+      excluded.push({ orderId: id, reason: "Order not found." });
+      continue;
+    }
+    if (!MANIFEST_STATUSES.includes(order.status)) {
+      excluded.push({
+        orderId: id,
+        reason: `Order is ${order.status}; only processing or shipped orders print.`,
+      });
+      continue;
+    }
+    const [addressRows, itemRows] = await Promise.all([
+      db
+        .select()
+        .from(orderAddresses)
+        .where(and(eq(orderAddresses.orderId, id), eq(orderAddresses.type, "SHIPPING"))),
+      db
+        .select({
+          productName: orderItems.productName,
+          variantName: orderItems.variantName,
+          sku: orderItems.sku,
+          quantity: orderItems.quantity,
+        })
+        .from(orderItems)
+        .where(eq(orderItems.orderId, id)),
+    ]);
+    const address = addressRows[0];
+    included.push({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      customerName: order.customerName,
+      address: address
+        ? {
+            firstName: address.firstName,
+            lastName: address.lastName,
+            phone: address.phone,
+            country: address.country,
+            city: address.city,
+            state: address.state,
+            postalCode: address.postalCode,
+            addressLine1: address.addressLine1,
+            addressLine2: address.addressLine2,
+          }
+        : null,
+      items: itemRows,
+      notes: order.notes,
+    });
+  }
+  return { included, excluded };
 }
