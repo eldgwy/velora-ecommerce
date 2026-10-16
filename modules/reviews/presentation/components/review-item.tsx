@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { formatDate } from "@/shared/lib/format";
 import { StarRatingDisplay } from "@/modules/reviews/presentation/components/star-rating";
 import { VerifiedBuyerBadge } from "@/modules/reviews/presentation/components/verified-badge";
@@ -20,12 +21,13 @@ export function ReviewItem({ review }: { review: PublicReviewView }) {
         <div className="flex flex-wrap gap-2">
           {review.images.map((img) =>
             img.url ? (
-              <img
+              <Image
                 key={img.id}
                 src={img.url}
                 alt={review.title ?? "Review photo"}
+                width={80}
+                height={80}
                 className="size-20 rounded-lg object-cover"
-                loading="lazy"
               />
             ) : null,
           )}

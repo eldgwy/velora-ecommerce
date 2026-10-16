@@ -1,7 +1,7 @@
 "use server";
 
 import { requireAdmin } from "@/shared/lib/guards";
-import { productSchema, type ProductFormValues } from "@/shared/types/catalog";
+import { productSchema } from "@/shared/types/catalog";
 import {
   createProduct as createProductService,
   updateProduct as updateProductService,
@@ -9,7 +9,6 @@ import {
   getProductById,
 } from "@/services/product.service";
 import { invalidateProductCache } from "@/shared/lib/cache/tags";
-import type { ActionResult } from "@/shared/types/actions";
 
 const GENERIC_ERROR = "We couldn't save the product. Please try again.";
 const NOT_FOUND_ERROR = "That product could not be found.";

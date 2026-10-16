@@ -1,4 +1,4 @@
-import { and, eq, gt, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/infrastructure/database";
 import {
   categories,
@@ -270,7 +270,7 @@ export const searchProducts = unstable_cache(
       return { items: [], totalCount: 0, totalPages: 0, currentPage: page, pageSize };
     }
 
-    const { conditions, visibleCategoryIds: filteredVisibleIds } = await buildSearchConditions(filters, visibleCategoryIds);
+    const { conditions } = await buildSearchConditions(filters, visibleCategoryIds);
     if (!conditions) {
       return { items: [], totalCount: 0, totalPages: 0, currentPage: page, pageSize };
     }

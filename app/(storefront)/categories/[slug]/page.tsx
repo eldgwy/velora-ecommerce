@@ -1,7 +1,8 @@
 import { Metadata } from "next";
 import { notFound } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
-import { getCategoryBySlug, listProducts, getCategoryTree } from "@/services/catalog-public";
+import { getCategoryBySlug, listProducts } from "@/services/catalog-public";
 
 interface CategoryPageProps {
   params: Promise<{ slug: string }>;
@@ -47,7 +48,7 @@ async function CategoryContent({ params }: CategoryPageProps) {
       <header className="mb-8">
         {category.logo && (
           <div className="mb-4">
-            <img src={category.logo} alt="" className="h-24 w-auto" />
+            <Image src={category.logo} alt="" width={192} height={96} className="h-24 w-auto" />
           </div>
         )}
         <h1 className="text-3xl font-bold tracking-tight">{category.name}</h1>
@@ -68,11 +69,13 @@ async function CategoryContent({ params }: CategoryPageProps) {
                 className="group p-4 border rounded-lg hover:border-primary/50 transition-colors"
               >
                 {sub.logo && (
-                  <div className="mb-2 aspect-square overflow-hidden rounded">
-                    <img
+                  <div className="mb-2 aspect-square relative overflow-hidden rounded">
+                    <Image
                       src={sub.logo}
                       alt=""
-                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      fill
+                      sizes="(max-width: 768px) 50vw, 25vw"
+                      className="object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                   </div>
                 )}
@@ -109,10 +112,12 @@ function ProductCard({ product }: { product: Awaited<ReturnType<typeof listProdu
     <Link href={`/products/${product.slug}`} className="group block">
       <div className="aspect-square relative overflow-hidden rounded-lg bg-muted">
         {product.primaryImage ? (
-          <img
+          <Image
             src={product.primaryImage.url}
             alt={product.primaryImage.alt ?? product.name}
-            className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+            fill
+            sizes="(max-width: 640px) 100vw, (max-width: 1280px) 33vw, 25vw"
+            className="object-cover group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">No Image</div>

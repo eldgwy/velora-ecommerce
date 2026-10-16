@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
 import { inventory, inventoryMovements, orderItems } from "@/infrastructure/database/schema";
-import { inventoryMovementTypeEnum, orderReservationStatusEnum } from "@/infrastructure/database/schema/enums";
+import { orderReservationStatusEnum } from "@/infrastructure/database/schema/enums";
 import { productVariants } from "@/infrastructure/database/schema/catalog";
 import { logger } from "@/shared/lib/logging/logger";
 import {

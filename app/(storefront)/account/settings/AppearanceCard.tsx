@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/shared/components/providers/ThemeProvider";
 import { MonitorIcon, MoonIcon, SunIcon } from "lucide-react";
 
 import {
@@ -23,8 +23,9 @@ const THEME_OPTIONS = [
 const emptySubscribe = () => () => {};
 
 /**
- * Light / dark / system picker backed by next-themes (the root layout's
- * ThemeProvider toggles the `.dark` class read by `globals.css`).
+ * Light / dark / system picker backed by the first-party ThemeProvider
+ * (the root layout's provider toggles the `.dark` class read by
+ * `globals.css`).
  */
 export default function AppearanceCard() {
   const { theme, setTheme } = useTheme();

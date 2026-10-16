@@ -55,7 +55,7 @@ import {
   processExpiredReservations,
   DEFAULT_JOB_CONFIG,
 } from "@/modules/jobs/release-expired-reservations";
-import { adjustReservation, adjustStock, getInventoryByVariant } from "@/services/inventory.service";
+import { adjustReservation, getInventoryByVariant } from "@/services/inventory.service";
 
 let rootId = "",
   childId = "",
@@ -926,7 +926,7 @@ describe("race conditions and concurrent lifecycle events", () => {
     ]);
 
     const successful = results.filter((r) => r.status === "fulfilled");
-    const failed = results.filter((r) => r.status === "rejected");
+    expect(results).toHaveLength(2);
 
     // At least one should succeed, final state should be consistent
     expect(successful.length).toBeGreaterThanOrEqual(1);
@@ -951,7 +951,7 @@ describe("race conditions and concurrent lifecycle events", () => {
     ]);
 
     const successful = results.filter((r) => r.status === "fulfilled");
-    const failed = results.filter((r) => r.status === "rejected");
+    expect(results).toHaveLength(2);
 
     // At least one should succeed, final state should be consistent
     expect(successful.length).toBeGreaterThanOrEqual(1);
@@ -1163,7 +1163,7 @@ describe("finalizeOrderPayment", () => {
     ]);
 
     const successful = results.filter((r) => r.status === "fulfilled");
-    const failed = results.filter((r) => r.status === "rejected");
+    expect(results).toHaveLength(2);
 
     // At least one should succeed
     expect(successful.length).toBeGreaterThanOrEqual(1);
@@ -1466,7 +1466,6 @@ describe("webhook race conditions", () => {
 });
 
 describe("expired reservation worker", () => {
-  let paymentId: string;
   let expiredOrderId: string;
   let validOrderId: string;
   let expiredPaymentId: string;

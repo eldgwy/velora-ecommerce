@@ -1,10 +1,7 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-
-import { requireAdmin, requireRole } from "@/shared/lib/guards";
-import { categorySchema, type CategoryFormValues } from "@/shared/types/catalog";
+import { requireAdmin } from "@/shared/lib/guards";
+import { categorySchema } from "@/shared/types/catalog";
 import {
   createCategory as createCategoryService,
   updateCategory as updateCategoryService,
@@ -15,7 +12,6 @@ import {
   validateParentCategory,
 } from "@/services/catalog.service";
 import { invalidateCategoryCache } from "@/shared/lib/cache/tags";
-import type { ActionResult } from "@/shared/types/actions";
 
 const GENERIC_ERROR = "We couldn't save the category. Please try again.";
 const NOT_FOUND_ERROR = "That category could not be found.";

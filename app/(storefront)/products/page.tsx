@@ -2,6 +2,11 @@ import { Metadata } from "next";
 import { searchProducts, getActiveBrands, getCategoryTree } from "@/services/catalog-public";
 import { getProductPromotionSummaries } from "@/modules/promotions/application/queries/promotion-pricing";
 import { ProductCard } from "@/shared/components/product/ProductCard";
+import {
+  InStockCheckbox,
+  RatingFilter,
+  SortSelect,
+} from "@/shared/components/product/CatalogFilterControls";
 import Link from "next/link";
 import { getCurrentSession } from "@/shared/lib/guards";
 import { getSavedProductIds } from "@/modules/wishlist/application/queries/wishlist";
@@ -115,7 +120,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
                   type="number"
                   name="minPrice"
                   placeholder="Min"
-                  value={params.minPrice ?? ""}
+                  defaultValue={params.minPrice ?? ""}
                   className="input input-sm"
                   step="0.01"
                   min="0"
@@ -124,7 +129,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
                   type="number"
                   name="maxPrice"
                   placeholder="Max"
-                  value={params.maxPrice ?? ""}
+                  defaultValue={params.maxPrice ?? ""}
                   className="input input-sm"
                   step="0.01"
                   min="0"
@@ -136,57 +141,19 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
 
           {/* In Stock */}
           <section>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                name="inStock"
-                checked={params.inStock === "true"}
-                onChange={(e) => {
-                  const url = new URL(window.location.href);
-                  if (e.target.checked) url.searchParams.set("inStock", "true");
-                  else url.searchParams.delete("inStock");
-                  url.searchParams.delete("page");
-                  window.location.href = url.toString();
-                }}
-                className="checkbox"
-              />
-              <span className="text-sm">In Stock Only</span>
-            </label>
+            <InStockCheckbox checked={params.inStock === "true"} />
           </section>
 
           {/* Rating Filter */}
           <section>
             <h3 className="font-semibold mb-3">Rating</h3>
-            <div className="space-y-1">
-              {[4, 3, 2, 1].map((stars) => (
-                <label key={stars} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="rating"
-                    value={String(stars)}
-                    checked={params.rating === String(stars)}
-                    onChange={(e) => {
-                      const url = new URL(window.location.href);
-                      if (e.target.checked) url.searchParams.set("rating", e.target.value);
-                      else url.searchParams.delete("rating");
-                      url.searchParams.delete("page");
-                      window.location.href = url.toString();
-                    }}
-                    className="radio"
-                  />
-                  <span className="text-sm flex items-center gap-1">
-                    {"★".repeat(stars)}{"☆".repeat(5 - stars)}
-                    <span className="text-muted-foreground"> & Up</span>
-                  </span>
-                </label>
-              ))}
-              <Link
-                href="/products"
-                className="block text-sm text-muted-foreground hover:text-foreground"
-              >
-                Clear Rating
-              </Link>
-            </div>
+            <RatingFilter selected={params.rating} />
+            <Link
+              href="/products"
+              className="block text-sm text-muted-foreground hover:text-foreground mt-1"
+            >
+              Clear Rating
+            </Link>
           </section>
         </aside>
 
@@ -197,22 +164,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
             <p className="text-sm text-muted-foreground">
               Showing {productsResult.items.length} of {productsResult.totalCount} products
             </p>
-            <select
-              value={filters.sort}
-              onChange={(e) => {
-                const url = new URL(window.location.href);
-                url.searchParams.set("sort", e.target.value);
-                url.searchParams.delete("page");
-                window.location.href = url.toString();
-              }}
-              className="select select-sm w-auto"
-              aria-label="Sort products"
-            >
-              <option value="newest">Newest</option>
-              <option value="price_asc">Price: Low to High</option>
-              <option value="price_desc">Price: High to Low</option>
-              <option value="rating">Top Rated</option>
-            </select>
+            <SortSelect value={filters.sort} />
           </div>
 
           {/* Product Grid */}

@@ -48,10 +48,7 @@ import {
   finalizeOrderPayment,
   handlePaymentFailureWebhook,
 } from "@/modules/orders/application/commands/finalize-payment";
-import {
-  InvalidOrderTransitionError,
-  OrderAlreadyCancelledError,
-} from "@/modules/orders/domain/errors/order-errors";
+import { InvalidOrderTransitionError } from "@/modules/orders/domain/errors/order-errors";
 
 const SFX = `olh-${Date.now()}`;
 const key = () => randomUUID();

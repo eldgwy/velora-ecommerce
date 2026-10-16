@@ -15,8 +15,10 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/",
 }));
 
-// Mock next/image
+// Mock next/image (raw <img> is intentional here: the mock itself must not
+// recurse into next/image).
 vi.mock("next/image", () => ({
+  // eslint-disable-next-line @next/next/no-img-element
   default: ({ src, alt, ...props }: Record<string, unknown>) => <img src={src as string} alt={alt as string} {...props} />,
 }));
 

@@ -59,6 +59,15 @@ const nextConfig: NextConfig = {
   experimental: {
     authInterrupts: true,
   },
+  // Product/brand/review media is served from Cloudinary (signed uploads).
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+      },
+    ],
+  },
   // Security headers
   async headers() {
     return [

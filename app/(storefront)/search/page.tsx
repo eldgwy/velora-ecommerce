@@ -1,5 +1,11 @@
 import { Metadata } from "next";
+import Image from "next/image";
 import { searchProducts, getActiveBrands, getCategoryTree } from "@/services/catalog-public";
+import {
+  InStockCheckbox,
+  RatingFilter,
+  SortSelect,
+} from "@/shared/components/product/CatalogFilterControls";
 import Link from "next/link";
 
 interface SearchPageProps {
@@ -77,7 +83,7 @@ async function SearchContent({ searchParams }: SearchPageProps) {
                 id="search-input"
                 type="search"
                 name="q"
-                value={query}
+                defaultValue={query}
                 placeholder="Search products..."
                 className="input w-full"
                 autoComplete="off"
@@ -132,7 +138,7 @@ async function SearchContent({ searchParams }: SearchPageProps) {
                   type="number"
                   name="minPrice"
                   placeholder="Min"
-                  value={params.minPrice ?? ""}
+                  defaultValue={params.minPrice ?? ""}
                   className="input input-sm"
                   step="0.01"
                   min="0"
@@ -141,7 +147,7 @@ async function SearchContent({ searchParams }: SearchPageProps) {
                   type="number"
                   name="maxPrice"
                   placeholder="Max"
-                  value={params.maxPrice ?? ""}
+                  defaultValue={params.maxPrice ?? ""}
                   className="input input-sm"
                   step="0.01"
                   min="0"
@@ -153,57 +159,19 @@ async function SearchContent({ searchParams }: SearchPageProps) {
 
           {/* In Stock */}
           <section>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                name="inStock"
-                checked={params.inStock === "true"}
-                onChange={(e) => {
-                  const url = new URL(window.location.href);
-                  if (e.target.checked) url.searchParams.set("inStock", "true");
-                  else url.searchParams.delete("inStock");
-                  url.searchParams.delete("page");
-                  window.location.href = url.toString();
-                }}
-                className="checkbox"
-              />
-              <span className="text-sm">In Stock Only</span>
-            </label>
+            <InStockCheckbox checked={params.inStock === "true"} />
           </section>
 
           {/* Rating Filter */}
           <section>
             <h3 className="font-semibold mb-3">Rating</h3>
-            <div className="space-y-1">
-              {[4, 3, 2, 1].map((stars) => (
-                <label key={stars} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="rating"
-                    value={String(stars)}
-                    checked={params.rating === String(stars)}
-                    onChange={(e) => {
-                      const url = new URL(window.location.href);
-                      if (e.target.checked) url.searchParams.set("rating", e.target.value);
-                      else url.searchParams.delete("rating");
-                      url.searchParams.delete("page");
-                      window.location.href = url.toString();
-                    }}
-                    className="radio"
-                  />
-                  <span className="text-sm flex items-center gap-1">
-                    {"★".repeat(stars)}{"☆".repeat(5 - stars)}
-                    <span className="text-muted-foreground"> & Up</span>
-                  </span>
-                </label>
-              ))}
-              <Link
-                href={`/search${query ? `?q=${encodeURIComponent(query)}` : ""}`}
+            <RatingFilter selected={params.rating} />
+            <Link
+              href={`/search${query ? `?q=${encodeURIComponent(query)}` : ""}`}
                 className="block text-sm text-muted-foreground hover:text-foreground"
               >
                 Clear Rating
               </Link>
-            </div>
           </section>
         </aside>
 
@@ -214,22 +182,7 @@ async function SearchContent({ searchParams }: SearchPageProps) {
             <p className="text-sm text-muted-foreground">
               Showing {productsResult.items.length} of {productsResult.totalCount} product{productsResult.totalCount !== 1 ? "s" : ""}
             </p>
-            <select
-              value={filters.sort}
-              onChange={(e) => {
-                const url = new URL(window.location.href);
-                url.searchParams.set("sort", e.target.value);
-                url.searchParams.delete("page");
-                window.location.href = url.toString();
-              }}
-              className="select select-sm w-auto"
-              aria-label="Sort products"
-            >
-              <option value="newest">Newest</option>
-              <option value="price_asc">Price: Low to High</option>
-              <option value="price_desc">Price: High to Low</option>
-              <option value="rating">Top Rated</option>
-            </select>
+            <SortSelect value={filters.sort} />
           </div>
 
           {/* Product Grid */}
@@ -311,10 +264,12 @@ function ProductCard({ product }: { product: Awaited<ReturnType<typeof searchPro
     <Link href={`/products/${product.slug}`} className="group block">
       <div className="aspect-square relative overflow-hidden rounded-lg bg-muted">
         {product.primaryImage ? (
-          <img
+          <Image
             src={product.primaryImage.url}
             alt={product.primaryImage.alt ?? product.name}
-            className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+            fill
+            sizes="(max-width: 640px) 100vw, (max-width: 1280px) 33vw, 25vw"
+            className="object-cover group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">No Image</div>

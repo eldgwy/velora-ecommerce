@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/infrastructure/database";
-import { orders, payments, webhookEvents } from "@/infrastructure/database/schema/orders";
+import { payments, webhookEvents } from "@/infrastructure/database/schema/orders";
 import { and, eq } from "drizzle-orm";
 import { logger } from "@/shared/lib/logging/logger";
 import { verifyStripeSignature } from "@/modules/orders/application/webhooks/verify-signature";

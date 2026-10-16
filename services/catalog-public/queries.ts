@@ -8,10 +8,9 @@ import {
   productImages,
   productOptions,
   productOptionValues,
-  variantOptionValues,
 } from "@/infrastructure/database/schema/catalog";
 import { inventory } from "@/infrastructure/database/schema/inventory";
-import { reviews, reviewImages } from "@/infrastructure/database/schema/reviews";
+import { reviews } from "@/infrastructure/database/schema/reviews";
 import { reviewStatusEnum } from "@/infrastructure/database/schema/enums";
 import { user } from "@/infrastructure/database/schema/auth";
 import { unstable_cache } from "next/cache";

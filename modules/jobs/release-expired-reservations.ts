@@ -1,7 +1,6 @@
-import { and, eq, lte, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
-import { orders } from "@/infrastructure/database/schema/orders";
 import { orderStatusEnum, orderReservationStatusEnum } from "@/infrastructure/database/schema/enums";
 import { logger } from "@/shared/lib/logging/logger";
 import { handleCheckoutExpiration } from "@/modules/orders/application/commands/order-lifecycle";

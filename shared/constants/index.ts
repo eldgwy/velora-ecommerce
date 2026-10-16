@@ -1,6 +1,15 @@
 import { StaticImageData } from 'next/image'
 
-const IMAGE_PATH='@/shared/images'
+import product1 from '../images/products/product1.jpg';
+import product2 from '../images/products/product2.jpg';
+import product3 from '../images/products/product3.jpg';
+import product4 from '../images/products/product4.jpg';
+import product5 from '../images/products/product5.jpg';
+import product6 from '../images/products/product6.jpg';
+import catWomen from '../images/categories/women.jpg';
+import catMen from '../images/categories/men.jpg';
+import catAccessories from '../images/categories/accessories.jpg';
+import catNewArrivals from '../images/categories/newArrivals.jpg';
 
 export type Product = {
   id: number,
@@ -57,7 +66,7 @@ export const Products: Product[] = [
     price: 150,
     description: "The Best Product 1",
     category: 'Jackets',
-    image: `${IMAGE_PATH}/products/product1.jpg`,
+    image: product1,
     stars: 4
   },
   {
@@ -66,7 +75,7 @@ export const Products: Product[] = [
     price: 250,
     description: "The Best Product 2",
     category: 'Clothes',
-    image: `${IMAGE_PATH}/products/product2.jpg`,
+    image: product2,
     stars: 4.5
   },
   {
@@ -75,7 +84,7 @@ export const Products: Product[] = [
     price: 300,
     description: "The Best Product 3",
     category: 'Clothes',
-    image: `${IMAGE_PATH}/products/product3.jpg`,
+    image: product3,
     stars: 5
   },
   {
@@ -84,7 +93,7 @@ export const Products: Product[] = [
     price: 200,
     description: "The Best Product 4",
     category: 'Jackets',
-    image: `${IMAGE_PATH}/products/product4.jpg`,
+    image: product4,
     stars: 3.5
   },
   {
@@ -93,7 +102,7 @@ export const Products: Product[] = [
     price: 350,
     description: "The Best Product 5",
     category: 'Bags',
-    image: `${IMAGE_PATH}/products/product5.jpg`,
+    image: product5,
     stars: 3
   },
   {
@@ -102,7 +111,7 @@ export const Products: Product[] = [
     price: 450,
     description: "The Best Product 6",
     category: 'Clothes',
-    image: `${IMAGE_PATH}/products/product6.jpg`,
+    image: product6,
     stars: 4
   },
 ]
@@ -111,21 +120,21 @@ export const categories = [
   {
     name: "Women",
     slug: "women",
-    image: `${IMAGE_PATH}/categories/women.jpg`,
+    image: catWomen,
   },
   {
     name: "Men",
     slug: "men",
-    image: `${IMAGE_PATH}/categories/men.jpg`,
+    image: catMen,
   },
   {
     name: "Accessories",
     slug: "accessories",
-    image: `${IMAGE_PATH}/categories/accessories.jpg`,
+    image: catAccessories,
   },
   {
     name: "New Arrivals",
     slug: "new-arrivals",
-    image: `${IMAGE_PATH}/categories/newArrivals.jpg`,
+    image: catNewArrivals,
   },
 ];

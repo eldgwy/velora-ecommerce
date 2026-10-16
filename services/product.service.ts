@@ -1,7 +1,6 @@
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/infrastructure/database";
 import {
-  categories,
   products,
 } from "@/infrastructure/database/schema/catalog";
 import {

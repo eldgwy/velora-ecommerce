@@ -1,27 +1,23 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
 import { productImages } from "@/infrastructure/database/schema/catalog";
 import { requireAdmin } from "@/shared/lib/guards";
-import { imageSchema, type ImageFormValues } from "@/shared/types/catalog";
+import { imageSchema } from "@/shared/types/catalog";
 import {
   createImage as createImageService,
   setPrimaryImage as setPrimaryImageService,
   deleteImageSafe as deleteImageSafeService,
-  listImagesByProduct,
   getImageById,
 } from "@/services/product-media.service";
 import { getProductById } from "@/services/product.service";
 import {
   createSignedUploadParams,
   deleteImage as deleteCloudinaryImage,
-  validateImageFile,
 } from "@/infrastructure/cloudinary/client";
 import { invalidateImageCache } from "@/shared/lib/cache/tags";
-import type { ActionResult } from "@/shared/types/actions";
 
 const GENERIC_ERROR = "We couldn't save the image. Please try again.";
 const NOT_FOUND_ERROR = "That product could not be found.";
@@ -30,7 +26,7 @@ export async function getSignedUploadParams(
   productId: string,
   folder?: string,
 ): Promise<{ params: ReturnType<typeof createSignedUploadParams> } | { error: string }> {
-  const session = await requireAdmin();
+  await requireAdmin();
 
   const product = await getProductById(productId);
   if (!product) return { error: NOT_FOUND_ERROR };
@@ -101,7 +97,7 @@ export async function deleteProductImage(
   if (!image) return { error: NOT_FOUND_ERROR };
 
   try {
-    const { deleted, newPrimary } = await deleteImageSafeService(imageId, session.user.id);
+    const { deleted } = await deleteImageSafeService(imageId, session.user.id);
     if (!deleted) return { error: NOT_FOUND_ERROR };
 
     // Clean up Cloudinary asset (best-effort, outside transaction)
@@ -123,7 +119,7 @@ export async function reorderImages(
   productId: string,
   imageIds: string[],
 ): Promise<{ ok: true } | { error: string }> {
-  const session = await requireAdmin();
+  await requireAdmin();
 
   const product = await getProductById(productId);
   if (!product) return { error: NOT_FOUND_ERROR };

@@ -1,9 +1,7 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
 import { requireAdmin } from "@/shared/lib/guards";
-import { brandSchema, type BrandFormValues } from "@/shared/types/catalog";
+import { brandSchema } from "@/shared/types/catalog";
 import {
   createBrand as createBrandService,
   updateBrand as updateBrandService,
@@ -11,7 +9,6 @@ import {
   getBrandById,
 } from "@/services/brand.service";
 import { invalidateBrandCache } from "@/shared/lib/cache/tags";
-import type { ActionResult } from "@/shared/types/actions";
 
 const GENERIC_ERROR = "We couldn't save the brand. Please try again.";
 const NOT_FOUND_ERROR = "That brand could not be found.";

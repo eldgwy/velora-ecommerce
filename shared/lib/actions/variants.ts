@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
 import { requireAdmin } from "@/shared/lib/guards";
 import { variantSchema, type VariantFormValues } from "@/shared/types/catalog";
 import {
@@ -14,7 +12,6 @@ import {
 import { listOptionsByProduct, listOptionValuesByOption } from "@/services/product-option.service";
 import { getProductById } from "@/services/product.service";
 import { invalidateVariantCache } from "@/shared/lib/cache/tags";
-import type { ActionResult } from "@/shared/types/actions";
 
 const GENERIC_ERROR = "We couldn't save the variant. Please try again.";
 const NOT_FOUND_ERROR = "That product could not be found.";

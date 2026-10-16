@@ -28,16 +28,24 @@ export const metadata: Metadata = {
 };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // suppressHydrationWarning: next-themes' blocking script sets the theme
-    // class and color-scheme on <html> before React hydrates (official
-    // next-themes remedy — the attributes intentionally differ pre/post
-    // hydration and must not be patched).
+    // suppressHydrationWarning: the theme is applied to <html> pre-paint by
+    // the blocking script below, so the class intentionally differs from the
+    // server render and must not be patched during hydration.
     <html
       lang="en"
       suppressHydrationWarning
       className={`${displayFont.variable} ${sansFont.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/* Blocking theme snippet: plain <script> in <body> (not next/script
+            under <html>) so React hydration sees valid HTML and it runs
+            pre-paint to avoid a theme flash. */}
+        <script
+          id="velora-theme"
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var d=document.documentElement;function s(t){d.classList.remove("light","dark");d.classList.add(t);d.style.colorScheme=t}try{var t=localStorage.getItem("theme")||"system";if(t==="system"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}s(t)}catch(e){}})();`,
+          }}
+        />
         <ThemeProvider>
           <SmoothScroll />
           {children}

@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import { getProductBySlug, getProductReviews } from "@/services/catalog-public";
 import { ProductReviewSection } from "@/modules/reviews/presentation/components/review-section";
@@ -101,12 +102,14 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
       <div className="grid lg:grid-cols-2 gap-8">
         {/* Product Gallery */}
         <section className="space-y-4">
-          <div className="aspect-square rounded-lg overflow-hidden bg-muted">
+          <div className="aspect-square relative rounded-lg overflow-hidden bg-muted">
             {primaryImage ? (
-              <img
+              <Image
                 src={primaryImage.url}
                 alt={primaryImage.alt ?? product.name}
-                className="h-full w-full object-cover"
+                fill
+                sizes="(max-width: 1024px) 100vw, 50vw"
+                className="object-cover"
               />
             ) : (
               <div className="flex h-full items-center justify-center text-muted-foreground">No Image</div>
@@ -126,7 +129,7 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
                     console.log("Select image:", image.id);
                   }}
                 >
-                  <img src={image.url} alt={image.alt ?? ""} className="h-full w-full object-cover" />
+                  <Image src={image.url} alt={image.alt ?? ""} width={80} height={80} className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>

@@ -1,4 +1,4 @@
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/infrastructure/database";
 import { categories } from "@/infrastructure/database/schema/catalog";
 import { logger } from "@/shared/lib/logging/logger";
