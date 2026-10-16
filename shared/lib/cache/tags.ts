@@ -76,6 +76,15 @@ export async function invalidateCollectionCache(slug?: string): Promise<void> {
 }
 
 /**
+ * Invalidate hero-banner caches after content, image, status, schedule,
+ * or order changes. The public carousel refreshes from these tags.
+ */
+export async function invalidateBannerCache(id?: string): Promise<void> {
+  updateTag(cacheTags.bannersList);
+  if (id) updateTag(cacheTags.banner(id));
+}
+
+/**
  * Invalidate cache for product images.
  */
 export async function invalidateImageCache(imageId: string, productId: string): Promise<void> {

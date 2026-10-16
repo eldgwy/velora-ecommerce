@@ -1,6 +1,6 @@
 "use client";
 
-import Hero from "@/shared/components/home/Hero";
+import { HeroBanners } from "@/shared/components/home/HeroBanners";
 import Products from "@/shared/components/home/Products";
 import FeaturedCategories from "@/shared/components/home/FeaturedCategories";
 import NewArrivals from "@/shared/components/home/NewArrivals";
@@ -12,7 +12,7 @@ import Newsletter from "@/shared/components/home/NewSletter";
 const Home = () => {
   return (
     <main>
-      <Hero />
+      <HeroBanners />
       <FeaturedCategories />
       <Products />
       <NewArrivals />

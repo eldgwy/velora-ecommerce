@@ -30,7 +30,10 @@ export const cacheTags = {
     // Collections
     collectionsList: "collections:list",
     collection: (slug: string) => `collection:${slug}`,
-    // Cart (dynamic per owner; invalidated after every cart DB commit)
+
+    // Hero banners
+    bannersList: "banners:list",
+    banner: (id: string) => `banner:${id}`,    // Cart (dynamic per owner; invalidated after every cart DB commit)
     cart: (cartId: string) => `cart:${cartId}`,
     userCart: (userId: string) => `cart:user:${userId}`,
     guestCart: (guestId: string) => `cart:guest:${guestId}`,

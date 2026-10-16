@@ -136,11 +136,11 @@ export const banners = pgTable(
       .defaultRandom()
       .primaryKey(),
 
-    title: text("title"),
+    title: text("title").notNull(),
 
     subtitle: text("subtitle"),
 
-    image: text("image"),
+    image: text("image").notNull(),
 
     mobileImage: text("mobile_image"),
 
@@ -176,6 +176,26 @@ export const banners = pgTable(
   },
   (table) => [
     index("banners_status_idx").on(table.status),
+
+    check(
+      "banners_title_length",
+      sql`char_length("title") BETWEEN 1 AND 120`,
+    ),
+
+    check(
+      "banners_subtitle_length",
+      sql`"subtitle" IS NULL OR char_length("subtitle") <= 300`,
+    ),
+
+    check(
+      "banners_sort_order_non_negative",
+      sql`"sort_order" IS NULL OR "sort_order" >= 0`,
+    ),
+
+    check(
+      "banners_window_ordered",
+      sql`"starts_at" IS NULL OR "ends_at" IS NULL OR "ends_at" > "starts_at"`,
+    ),
 
     index("banners_sort_order_idx").on(
       table.sortOrder,
