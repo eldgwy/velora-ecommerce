@@ -84,6 +84,16 @@ live Stripe operations were performed (all provider behavior via mocks/fixtures)
   same syntax as existing entries); runtime execution still unverified
   (High → Medium, pending first staging cron 200s).
 
+### Phase 5 — optional product enhancements (code + tests, staged cron unverified)
+
+| # | Item | Verified behavior |
+|---|---|---|
+| T-5.1 | Abandonment recovery queue | 0037 `cart_recovery_emails` applied + verified in psql (journal 38/38); unique `(cart_id, stage)` claim; stage ladder gated on prior stage SENT; FAILED terminal (no repeats to a bouncing mailbox); 7-day per-user cap suppressing NEW cycles only; DB-epoch-seconds freshness (no DB/Node clock crossing); CAS dispatch + claim/lease/backoff reusing the auth-email machinery; hourly `0 * * * *` cron entry (`CRON_SECRET` POST) — **runtime cron unverified until first staging 200** |
+| T-5.2 | Order invoice PDF | Pure pdf-lib renderer (WinAnsi sanitizer), ownership-scoped via `getOrderDetail` (wrong owner → 404 semantics), session+UUID route, `private, no-store`; unit 3/3; statutory invoice fields deliberately absent (D22 legal/provider gate) |
+| T-5.3 | Search facets | `getSearchFacets` under `productsListing` tag / revalidate 60; counts computed under other-filters-minus-own; totalCount under all filters (consistency asserted against `searchProducts.totalCount`); derived-table rating bands (Postgres 42803); integration 5/5 |
+| T-5.4 | Review re-moderation | Any non-self status transition (incl. re-open from approved/rejected) allowed per product decision; content stays immutable; audit columns on real transitions only; 17/17 across flipped suites |
+| T-5.5 | Display currency (foundation) | `DISPLAY_CURRENCY_RATES` off by default (pure USD, selector hidden); configured → cookie-driven card-price conversion with exact decimal half-up rounding; cart/checkout/invoices/emails stay USD (D23); unit 10/10 |
+
 ### Phase 4 — payment/refund matrix (code + tests)
 
 | # | Scenario | Verified behavior |
@@ -205,11 +215,12 @@ and `SENT` marking (lease-bound resend). No silent loss: exhaustion lands in
 Each line needs a named owner + date. Nothing below may be pre-checked.
 
 - [ ] Staging database provisioned isolated from production (owner: DBA)
-- [ ] `pnpm db:migrate` green on staging; journal at 20/20 (owner: DBA)
+- [ ] `pnpm db:migrate` green on staging; journal current with the migration chain (38/38 as of this writing — 0000–0037; 0036 = products listing partial index T-4.5, 0037 = cart recovery queue T-5.1) (owner: DBA)
 - [ ] All staging env vars set per `docs/staging.md` §2, values never committed (owner: platform)
 - [ ] Stripe test-mode: intent created, webhook verified, duplicate + invalid-signature + cancel-late + refund flows exercised (owner: payments)
 - [ ] SMTP sandbox verified: all 8 notification types delivered to staging inbox (owner: platform)
-- [ ] Cron 200s observed for all 3 jobs; unauthorized probes 401 (owner: platform)
+- [ ] Cron 200s observed for all 5 configured jobs (expire-reservations, deliver-low-stock-alerts, notification-retry, sync-banners, auth-email-retry; see `vercel.json`); unauthorized probes 401 (owner: platform)
+- [ ] `GET /api/health` observed 200 with `checks.database.status = "up"` and 404-free; uptime monitor pointed at it (owner: platform)
 - [ ] Backup archive produced + restore drill green on isolated target (owner: DBA)
 - [ ] 8 alerts wired with owners/runbooks; on-call acknowledges test pages (owner: on-call lead)
 - [ ] Orphan scans at zero (or reviewed); FKs validated; `VALIDATE` log attached (owner: DBA)

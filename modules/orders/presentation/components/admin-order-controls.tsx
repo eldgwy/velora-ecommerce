@@ -109,6 +109,13 @@ export function AdminOrderControls({
                 Paid orders keep their payment state on cancellation — refunds are handled through the refund
                 workflow, never automatically here.
               </p>
+            ) : paymentStatus === "REFUNDED" || paymentStatus === "PARTIALLY_REFUNDED" ? (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="note">
+                This order has a refunded payment, so it cannot be cancelled here. Cancellation
+                releases reserved stock — refunded orders re-enter stock only through the verified
+                return workflow, so any cancellation request is settled as a refund or return
+                instead.
+              </p>
             ) : null}
           </div>
         ) : (

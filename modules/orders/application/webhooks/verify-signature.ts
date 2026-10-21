@@ -37,9 +37,9 @@ export function verifyStripeSignature(
 
   for (const element of elements) {
     const [key, value] = element.split("=");
-    if (key === "t") {
+    if (key === "t" && value !== undefined) {
       timestamp = parseInt(value, 10);
-    } else if (key === "v1") {
+    } else if (key === "v1" && value !== undefined) {
       signatures.push(value);
     }
   }

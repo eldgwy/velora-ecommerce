@@ -13,7 +13,7 @@ import { couponUsages } from "@/infrastructure/database/schema/discounts";
 import { addresses, customerProfiles } from "@/infrastructure/database/schema/customers";
 import {
   findActiveCartId,
-  resolveCatalogEntry,
+  resolveCatalogEntries,
 } from "@/modules/cart/application/cart-context";
 import {
   MAX_QUANTITY_PER_ITEM,
@@ -183,7 +183,7 @@ function violatedConstraint(error: unknown): string | null {
       if (typeof record.constraint === "string") return record.constraint;
       const message = typeof record.message === "string" ? record.message : "";
       const match = message.match(/constraint "([^"]+)"/);
-      if (match) return match[1];
+      if (match) return match[1] ?? null;
       current = "cause" in record ? record.cause : null;
       continue;
     }
@@ -379,7 +379,7 @@ export async function placeOrder(
   // twin having reserved first (timeout-retry racing the original attempt).
   if (await needsReservation(created.orderId)) {
     try {
-      await reserveOrderInventory(created.orderId, { actorId: user.id });
+      await reserveOrderInventory(created.orderId, { actorId: user.id, actorType: "customer" });
     } catch (error) {
       if (error instanceof OrderAlreadyReservedError) {
         // Reserved by the racing twin — proceed to payment init.
@@ -462,13 +462,25 @@ async function revalidateLines(
   const items: Array<{ variantId: string; inStock: boolean }> = [];
   let valid = true;
 
+  // T-4.1/GP-10: quantity-invalid lines need no catalog read; the rest
+  // resolve in ONE batched query set instead of ~5 queries per line.
+  const quantitiesValid = cartLines.filter(
+    (line) =>
+      Number.isInteger(line.quantity) &&
+      line.quantity >= 1 &&
+      line.quantity <= MAX_QUANTITY_PER_ITEM,
+  );
+  const entries = await resolveCatalogEntries(
+    quantitiesValid.map((line) => line.variantId),
+  );
+
   for (const line of cartLines) {
     if (!Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > MAX_QUANTITY_PER_ITEM) {
       valid = false;
       items.push({ variantId: line.variantId, inStock: false });
       continue;
     }
-    const entry = await resolveCatalogEntry(line.variantId);
+    const entry = entries.get(line.variantId);
     if (
       !entry ||
       !isPurchasable(entry.variantStatus, entry.productStatus) ||
@@ -872,7 +884,7 @@ async function replayPriorOrder(
   }
   if (await needsReservation(orderId)) {
     try {
-      await reserveOrderInventory(orderId, { actorId: userId });
+      await reserveOrderInventory(orderId, { actorId: userId, actorType: "customer" });
     } catch (error) {
       if (error instanceof OrderAlreadyReservedError) {
         // Reserved concurrently — proceed.

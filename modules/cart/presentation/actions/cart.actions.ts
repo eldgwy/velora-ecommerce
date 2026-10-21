@@ -91,6 +91,7 @@ async function resolveOwnerWithMerge(): Promise<{
   if (!verified) {
     if (raw !== null) {
       // Tampered or malformed: drop it so it cannot linger.
+      // eslint-disable-next-line drizzle/enforce-delete-with-where -- cookies() jar, not a drizzle table
       jar.delete(GUEST_CART_COOKIE_NAME);
     }
     return { owner: { kind: "user", userId: session.user.id }, merge: null };
@@ -110,6 +111,7 @@ async function resolveOwnerWithMerge(): Promise<{
   }
 
   if (merge.guestCartConsumed) {
+    // eslint-disable-next-line drizzle/enforce-delete-with-where -- cookies() jar, not a drizzle table
     jar.delete(GUEST_CART_COOKIE_NAME);
   }
   await invalidateCartCache({ userId: session.user.id, guestId: verified.guestId });
@@ -253,6 +255,7 @@ export async function mergeGuestCartAction(): Promise<ActionResult<MergeCartResu
 
   try {
     const result = await mergeGuestCartIntoUserCart(session.user.id, verified.guestId);
+    // eslint-disable-next-line drizzle/enforce-delete-with-where -- cookies() jar, not a drizzle table
     if (result.guestCartConsumed) jar.delete(GUEST_CART_COOKIE_NAME);
     await invalidateCartCache({ userId: session.user.id, guestId: verified.guestId });
     return { ok: true, data: result };

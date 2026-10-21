@@ -8,6 +8,7 @@ import { logger } from "@/shared/lib/logging/logger";
 import {
   claimNotification,
   markNotificationSent,
+  startNotificationDispatch,
 } from "@/modules/orders/application/commands/order-transitions";
 import { computeBackoffMs, sanitizeProviderError } from "@/modules/notifications/application/backoff";
 
@@ -46,6 +47,13 @@ export async function dispatchOrderNotification(
 ): Promise<{ sent: boolean; reason?: string }> {
   const won = await claimNotification(orderId, type);
   if (!won) return { sent: false, reason: "already-handled" };
+
+  // Lease the row for the SMTP call (T-3.4): QUEUED -> SENDING. A retry
+  // worker claiming the row between our insert and this CAS wins — then we
+  // skip instead of double-sending. A crash after this point leaves a
+  // SENDING lease the worker reaps at expiry.
+  const leased = await startNotificationDispatch(orderId, type);
+  if (!leased) return { sent: false, reason: "already-handled" };
 
   const context = await loadNotificationContext(orderId);
   if (!context) return { sent: false, reason: "context-missing" };

@@ -1,0 +1,175 @@
+# CI pipeline (T-2.5 / GP-35).
+#
+# Jobs mirror the audit acceptance criteria:
+#   1. verify    — typecheck + lint + unit tests. Unit tests are DB-free by
+#                  design (the `test:unit` script exists so a contributor
+#                  without Postgres can still verify locally).
+#   2. build     — `next build` with the environment the schema requires.
+#                  The build job provisions its own Postgres because the
+#                  prerender pass executes `unstable_cache` catalog queries
+#                  (category tree, listing pages) against DATABASE_URL.
+#   3. integration — DB-backed suite against a `postgres:18` service
+#                  (matches the verified local dev DB, 18.6). It MUST run
+#                  migrations first (handwritten journal, `pnpm db:migrate`).
+#                  Concurrency is pinned with `--maxWorkers 4`: the suites
+#                  share ONE database per run (tests/_db.ts), and engaging
+#                  every runner core for parallel forks is the class of
+#                  contention root-caused in
+#                  docs/production-remediation-report.md §6.
+#
+# E2E framework decision (roadmap T-2.5), recorded without a dependency
+# change: Playwright is the recommendation — first-party Next.js docs,
+# multi-browser, codegen; to be installed/implemented in a separate
+# reviewed change when the product owner schedules e2e scope.
+#
+# Required repository secrets (optional — placeholder fallbacks keep the
+# pipeline green for forks/PRs before ops configures them; they are NOT
+# production credentials and exist only to satisfy the strict env schema
+# in config/env.ts at build time):
+#   DATABASE_URL, BETTER_AUTH_URL, BETTER_AUTH_SECRET, BETTER_AUTH_API_KEY,
+#   SMTP_HOST, SMTP_USER, SMTP_PASS, CLOUDINARY_CLOUD_NAME,
+#   CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, lint, unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+  build:
+    name: Production build
+    needs: verify
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: velora_user
+          POSTGRES_PASSWORD: velora_ci
+          POSTGRES_DB: velora_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U velora_user -d velora_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Prerendering executes catalog queries; the build needs a live DB.
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://velora_user:velora_ci@localhost:5432/velora_db' }}
+      BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL || 'http://localhost:3000' }}
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'ci-placeholder-not-a-production-secret' }}
+      BETTER_AUTH_API_KEY: ${{ secrets.BETTER_AUTH_API_KEY || 'ci-placeholder-not-a-production-secret' }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST || 'smtp.example.com' }}
+      SMTP_USER: ${{ secrets.SMTP_USER || 'ci-placeholder@example.com' }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS || 'ci-placeholder-not-a-production-secret' }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME || 'velora-ci-placeholder' }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY || '000000000000000' }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET || 'ci-placeholder-not-a-production-secret' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prerender-time schema check
+        run: pnpm db:migrate
+
+      - name: Build
+        run: pnpm build
+
+  integration:
+    name: Integration (Postgres 18)
+    needs: verify
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: velora_user
+          POSTGRES_PASSWORD: velora_ci
+          POSTGRES_DB: velora_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U velora_user -d velora_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # _db.ts (tests) reads VELORA_TEST_DATABASE_URL; the migration runner
+      # and any non-mocked code path read DATABASE_URL via config/env.ts,
+      # whose schema therefore requires the placeholder env set as well.
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://velora_user:velora_ci@localhost:5432/velora_db' }}
+      VELORA_TEST_DATABASE_URL: ${{ secrets.VELORA_TEST_DATABASE_URL || 'postgresql://velora_user:velora_ci@localhost:5432/velora_db' }}
+      BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL || 'http://localhost:3000' }}
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'ci-placeholder-not-a-production-secret' }}
+      BETTER_AUTH_API_KEY: ${{ secrets.BETTER_AUTH_API_KEY || 'ci-placeholder-not-a-production-secret' }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST || 'smtp.example.com' }}
+      SMTP_USER: ${{ secrets.SMTP_USER || 'ci-placeholder@example.com' }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS || 'ci-placeholder-not-a-production-secret' }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME || 'velora-ci-placeholder' }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY || '000000000000000' }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET || 'ci-placeholder-not-a-production-secret' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations
+        run: pnpm db:migrate
+
+      - name: Integration tests (single shared DB, pinned concurrency)
+        run: pnpm test:integration -- --maxWorkers 4

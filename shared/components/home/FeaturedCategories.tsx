@@ -1,19 +1,28 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
-import { categories } from "@/shared/constants";
 import { useRef } from "react";
+import Link from "next/link";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 
 gsap.registerPlugin(ScrollTrigger);
 
-const FeaturedCategories = () => {
+/**
+ * Featured categories (GP-02): driven by the effective-visible category
+ * tree (server-fetched). Category rows carry no imagery columns in the
+ * schema, so cards render the established secondary-surface treatment —
+ * an explicit visual state, not a fabricated photo. Links point at the
+ * real category route (`/categories/[slug]`).
+ *
+ * Empty tree renders nothing rather than a fabricated section.
+ */
+const FeaturedCategories = ({
+  categories,
+}: {
+  categories: Array<{ name: string; slug: string }>;
+}) => {
   const sectionRef = useRef<HTMLElement>(null);
-  const titleRef = useRef<HTMLDivElement>(null);
-  const cardsRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
     () => {
@@ -26,9 +35,8 @@ const FeaturedCategories = () => {
 
       const heading = section.querySelector<HTMLElement>(".category-heading");
       const cards = gsap.utils.toArray<HTMLElement>(".category-card");
-      const images = gsap.utils.toArray<HTMLElement>(".category-image");
+      if (cards.length === 0) return;
 
-      // Master timeline controlled entirely by scroll position
       const tl = gsap.timeline({
         scrollTrigger: {
           trigger: section,
@@ -39,38 +47,22 @@ const FeaturedCategories = () => {
         },
       });
 
-      /*
-       * =========================
-       * ENTER
-       * =========================
-       */
-
-      // Heading enters from below
       if (heading) {
         tl.fromTo(
           heading,
-          {
-            y: 60,
-            opacity: 0,
-          },
-          {
-            y: 0,
-            opacity: 1,
-            duration: 0.3,
-            ease: "power2.out",
-          },
+          { y: 56, opacity: 0 },
+          { y: 0, opacity: 1, duration: 0.3, ease: "power2.out" },
           0,
         );
       }
 
-      // Cards enter from below
       tl.fromTo(
         cards,
         {
-          y: 140,
+          y: 130,
           opacity: 0,
-          scale: 0.9,
-          rotate: (index) => (index % 2 === 0 ? -1.5 : 1.5),
+          scale: 0.95,
+          rotate: (index) => (index % 2 === 0 ? -1 : 1),
         },
         {
           y: 0,
@@ -78,101 +70,34 @@ const FeaturedCategories = () => {
           scale: 1,
           rotate: 0,
           duration: 0.35,
-          stagger: 0.08,
+          stagger: 0.07,
           ease: "power2.out",
         },
         0.05,
       );
 
-      /*
-       * =========================
-       * IMAGE MOVEMENT
-       * =========================
-       */
-
-      tl.fromTo(
-        images,
-        {
-          scale: 1.08,
-          yPercent: (index) => (index % 2 === 0 ? 5 : -5),
-        },
-        {
-          scale: 1,
-          yPercent: 0,
-          duration: 0.4,
-          stagger: 0.05,
-          ease: "none",
-        },
-        0,
-      );
-
-      /*
-       * =========================
-       * HOLD
-       * =========================
-       *
-       * Nothing happens here.
-       *
-       * The cards stay visible while
-       * the user continues scrolling.
-       */
-
-      /*
-       * =========================
-       * EXIT
-       * =========================
-       */
-
-      // Heading leaves upward
-      if (heading) {
-        tl.to(
-          heading,
-          {
-            y: -60,
-            opacity: 0,
-            duration: 0.3,
-            ease: "power2.in",
-          },
-          0.7,
-        );
-      }
-
-      // Cards leave upward
       tl.to(
         cards,
         {
-          y: -140,
+          y: -60,
           opacity: 0,
-          scale: 0.9,
-          rotate: (index) => (index % 2 === 0 ? 1.5 : -1.5),
-          duration: 0.3,
-          stagger: 0.08,
-          ease: "power2.in",
-        },
-        0.7,
-      );
-
-      // Images subtly move while section exits
-      tl.to(
-        images,
-        {
-          scale: 1.08,
-          yPercent: (index) => (index % 2 === 0 ? -5 : 5),
           duration: 0.3,
           stagger: 0.05,
-          ease: "none",
+          ease: "power2.in",
         },
-        0.7,
+        0.75,
       );
     },
     { scope: sectionRef },
   );
 
+  if (categories.length === 0) return null;
+
   return (
     <section ref={sectionRef} className="px-4 py-20 md:px-8 lg:py-28">
       <div className="mx-auto max-w-360">
         {/* Section Header */}
-        <div ref={titleRef} className="mb-10 flex items-end justify-between">
+        <div className="category-heading mb-10 flex items-end justify-between">
           <div>
             <p className="mb-3 text-xs font-medium uppercase tracking-[0.25em] text-primary">
               Explore
@@ -184,7 +109,7 @@ const FeaturedCategories = () => {
           </div>
 
           <Link
-            href="/categories"
+            href="/products"
             className="hidden text-sm font-medium transition-colors hover:text-primary md:block"
           >
             View All →
@@ -192,26 +117,23 @@ const FeaturedCategories = () => {
         </div>
 
         {/* Categories */}
-        <div
-          ref={cardsRef}
-          className="grid grid-cols-2 gap-4 md:grid-cols-4 category-card"
-        >
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {categories.map((category) => (
             <Link
               key={category.slug}
-              href={`/category/${category.slug}`}
-              className="group relative overflow-hidden rounded-2xl"
+              href={`/categories/${category.slug}`}
+              className="category-card group relative overflow-hidden rounded-2xl"
             >
-              <div className="relative aspect-4/5 overflow-hidden">
-                <Image
-                  src={category.image}
-                  alt={category.name}
-                  fill
-                  className="object-cover transition-transform duration-700 group-hover:scale-105"
-                />
+              <div className="relative aspect-4/5 overflow-hidden bg-secondary">
+                {/* Categories carry no imagery columns; the name-monogram
+                    surface is the explicit no-photography state. */}
+                <div className="absolute inset-0 flex items-start justify-start p-5">
+                  <span className="font-display text-5xl text-white/15 md:text-6xl">
+                    {category.name.charAt(0)}
+                  </span>
+                </div>
 
-                {/* Overlay */}
-                <div className="absolute inset-0 bg-black/10 transition-colors duration-500 group-hover:bg-black/20" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent transition-colors duration-500 group-hover:from-black/40" />
 
                 {/* Content */}
                 <div className="absolute inset-x-0 bottom-0 p-5">
@@ -229,10 +151,7 @@ const FeaturedCategories = () => {
         </div>
 
         {/* Mobile View All */}
-        <Link
-          href="/categories"
-          className="mt-6 block text-sm font-medium md:hidden"
-        >
+        <Link href="/products" className="mt-6 block text-sm font-medium md:hidden">
           View All Categories →
         </Link>
       </div>

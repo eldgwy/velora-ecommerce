@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 import { Button } from "@/shared/components/ui/button";
 import { Separator } from "@/shared/components/ui/separator";
@@ -58,11 +59,13 @@ export default async function WishlistPage() {
                   aria-label={`View ${item.productName}`}
                 >
                   {item.primaryImageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <Image
+                      // Cloudinary is allowlisted in images.remotePatterns.
                       src={item.primaryImageUrl}
                       alt={item.primaryImageAlt ?? item.productName}
-                      className="h-full w-full object-cover"
+                      fill
+                      sizes="80px"
+                      className="object-cover"
                     />
                   ) : (
                     <span className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">

@@ -70,6 +70,25 @@ export interface SendPasswordResetEmailOptions {
   url: string;
 }
 
+/** Plain-text body of the branded "reset your password" message. */
+export function passwordResetEmailText({
+  name,
+  url,
+}: {
+  name: string;
+  url: string;
+}): string {
+  return [
+    `Hi ${name},`,
+    "",
+    "We received a request to reset the password for your Velora account.",
+    "Choose a new password using this link:",
+    url,
+    "",
+    "This link expires in 60 minutes. If you didn't request a password reset you can ignore this email — your password stays the same.",
+  ].join("\n");
+}
+
 /** Send the branded "reset your password" message (60-minute link). */
 export async function sendPasswordResetEmail({
   to,
@@ -82,15 +101,7 @@ export async function sendPasswordResetEmail({
     to,
     subject: PASSWORD_RESET_EMAIL_SUBJECT,
     html: renderPasswordResetEmail({ name: firstName, email: to, url }),
-    text: [
-      `Hi ${firstName},`,
-      "",
-      "We received a request to reset the password for your Velora account.",
-      "Choose a new password using this link:",
-      url,
-      "",
-      "This link expires in 60 minutes. If you didn't request a password reset you can ignore this email — your password stays the same.",
-    ].join("\n"),
+    text: passwordResetEmailText({ name: firstName, url }),
   });
 }
 
@@ -169,6 +180,24 @@ export interface SendVerificationEmailOptions {
   url: string;
 }
 
+/** Plain-text body of the branded "confirm your email address" message. */
+export function verificationEmailText({
+  name,
+  url,
+}: {
+  name: string;
+  url: string;
+}): string {
+  return [
+    `Hi ${name},`,
+    "",
+    "Thanks for joining Velora. Confirm your email address to activate your account:",
+    url,
+    "",
+    "This link expires in 24 hours. If you didn't create a Velora account you can ignore this email.",
+  ].join("\n");
+}
+
 /** Send the branded "confirm your email address" message. */
 export async function sendVerificationEmail({
   to,
@@ -181,14 +210,7 @@ export async function sendVerificationEmail({
     to,
     subject: VERIFICATION_EMAIL_SUBJECT,
     html: renderVerificationEmail({ name: firstName, email: to, url }),
-    text: [
-      `Hi ${firstName},`,
-      "",
-      "Thanks for joining Velora. Confirm your email address to activate your account:",
-      url,
-      "",
-      "This link expires in 24 hours. If you didn't create a Velora account you can ignore this email.",
-    ].join("\n"),
+    text: verificationEmailText({ name: firstName, url }),
   });
 }
 

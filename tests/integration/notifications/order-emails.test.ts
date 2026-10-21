@@ -60,7 +60,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({ name: "NT Product", status: "ACTIVE", basePrice: "10.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "NT Product", status: "ACTIVE", basePrice: "10.00", categoryId, brandId })
     .returning();
   productId = prod.id;
   const [v] = await testDb
@@ -129,5 +129,61 @@ describe("order notification dispatch", () => {
   it("sends different event types independently", async () => {
     const res = await dispatchOrderNotification(orderId, "order_shipped");
     expect(res.sent).toBe(true);
+  });
+
+  it("leases the row SENDING for the duration of the SMTP call (T-3.4)", async () => {
+    let release!: (value: never) => void;
+    const gate = new Promise((resolve) => {
+      release = resolve as typeof release;
+    });
+    vi.mocked(sendMail).mockImplementationOnce(() => gate as never);
+
+    const pending = dispatchOrderNotification(orderId, "refund_issued");
+
+    // The row must be leased (SENDING) while the provider call is in flight —
+    // a concurrent retry worker can no longer claim it for a duplicate send.
+    await expect
+      .poll(
+        async () => {
+          const [row] = await testDb
+            .select({ status: orderNotifications.status })
+            .from(orderNotifications)
+            .where(
+              and(
+                eq(orderNotifications.orderId, orderId),
+                eq(orderNotifications.type, "refund_issued"),
+              ),
+            );
+          return row?.status;
+        },
+        { timeout: 5_000, interval: 50 },
+      )
+      .toBe("SENDING");
+
+    release({ messageId: "m-lease" } as never);
+    const res = await pending;
+    expect(res).toEqual({ sent: true });
+    const [row] = await testDb
+      .select({ status: orderNotifications.status })
+      .from(orderNotifications)
+      .where(
+        and(
+          eq(orderNotifications.orderId, orderId),
+          eq(orderNotifications.type, "refund_issued"),
+        ),
+      );
+    expect(row!.status).toBe("SENT");
+  });
+
+  it("skips sending when another path already owns the row", async () => {
+    // Put the row into another path's lease state: the dispatch CAS must
+    // refuse and no duplicate mail goes out.
+    await testDb
+      .insert(orderNotifications)
+      .values({ orderId, type: "order_delivered", status: "SENDING", attempts: 1 });
+    const callsBefore = vi.mocked(sendMail).mock.calls.length;
+    const res = await dispatchOrderNotification(orderId, "order_delivered");
+    expect(res).toEqual({ sent: false, reason: "already-handled" });
+    expect(vi.mocked(sendMail).mock.calls.length).toBe(callsBefore);
   });
 });

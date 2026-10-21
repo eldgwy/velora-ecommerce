@@ -24,7 +24,7 @@ vi.mock("@/shared/lib/guards", () => ({
 }));
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 
 import { testDb } from "../_db";
 import {
@@ -37,7 +37,9 @@ import {
 import { orderItems, orders } from "@/infrastructure/database/schema/orders";
 import { reviewImages, reviews } from "@/infrastructure/database/schema/reviews";
 import { user } from "@/infrastructure/database/schema/auth";
+import { rateLimit } from "@/infrastructure/database/schema/rate-limit";
 import { submitReview } from "@/modules/reviews/application/commands/submit-review";
+import { env } from "@/config/env";
 import {
   getReviewImageUploadParamsAction,
   submitReviewAction,
@@ -101,11 +103,11 @@ beforeAll(async () => {
   brandId = br.id;
   const [p1] = await testDb
     .insert(products)
-    .values({ name: "RS Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "RS Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
     .returning();
   const [p2] = await testDb
     .insert(products)
-    .values({ name: "RS Product 2", status: "ACTIVE", basePrice: "30.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "RS Product 2", status: "ACTIVE", basePrice: "30.00", categoryId, brandId })
     .returning();
   productId = p1.id;
   product2Id = p2.id;
@@ -160,6 +162,12 @@ beforeEach(() => {
   sessionStore.userId = null;
 });
 
+/** The only delivery URL shape the signed review-upload flow can produce. */
+function reviewImageUrl(authorId: string, basename: string): string {
+  const publicId = `velora/reviews/${authorId}/${basename}`;
+  return `https://res.cloudinary.com/${env.CLOUDINARY_CLOUD_NAME}/image/upload/v1/${publicId}.jpg`;
+}
+
 describe("review submission", () => {
   it("creates a PENDING review with images and invalidates caches", async () => {
     sessionStore.userId = userA;
@@ -169,8 +177,8 @@ describe("review submission", () => {
       title: "Excellent",
       content: "Wore it all week.",
       images: [
-        { url: "https://example.com/a.jpg", publicId: "rs/a" },
-        { url: "https://example.com/b.jpg", publicId: "rs/b" },
+        { url: reviewImageUrl(userA, "a"), publicId: `velora/reviews/${userA}/a` },
+        { url: reviewImageUrl(userA, "b"), publicId: `velora/reviews/${userA}/b` },
       ],
     });
     expect(res.ok).toBe(true);
@@ -241,6 +249,33 @@ describe("review submission", () => {
     await expect(
       submitReview({ userId: userA, productId, rating: 5, images: [{ url: "http://x.com/a.jpg", publicId: "a" }] }),
     ).rejects.toBeInstanceOf(ReviewValidationError);
+    // UGC upload-ownership (GP-15): references outside the author's own
+    // signed upload folder, and URLs that do not deliver that reference,
+    // are rejected — only images produced by this application's flow pass.
+    await expect(
+      submitReview({
+        userId: userA,
+        productId,
+        rating: 5,
+        images: [{ url: reviewImageUrl(userA, "ok"), publicId: `velora/reviews/${userB}/ok` }],
+      }),
+    ).rejects.toBeInstanceOf(ReviewValidationError);
+    await expect(
+      submitReview({
+        userId: userA,
+        productId,
+        rating: 5,
+        images: [{ url: "https://evil.example.com/a.jpg", publicId: `velora/reviews/${userA}/a` }],
+      }),
+    ).rejects.toBeInstanceOf(ReviewValidationError);
+    await expect(
+      submitReview({
+        userId: userA,
+        productId,
+        rating: 5,
+        images: [{ url: reviewImageUrl(userA, "other"), publicId: `velora/reviews/${userA}/a` }],
+      }),
+    ).rejects.toBeInstanceOf(ReviewValidationError);
     await expect(
       submitReview({ userId: userA, productId: "00000000-0000-0000-0000-000000000000", rating: 5 }),
     ).rejects.toBeInstanceOf(ReviewValidationError);
@@ -253,6 +288,37 @@ describe("review submission", () => {
       ReviewValidationError,
     );
     await testDb.update(products).set({ status: "ACTIVE" }).where(eq(products.id, productId));
+  });
+
+  it("throttles rapid review submissions per user (GP-15)", { timeout: 30_000 }, async () => {
+    sessionStore.userId = userA;
+    // Fresh budget for this actor: earlier tests in this file consumed the
+    // shared limiter counter.
+    await testDb.delete(rateLimit).where(like(rateLimit.key, `reviews:submit:${userA}`));
+    await testDb.delete(reviews).where(eq(reviews.productId, productId));
+
+    // max 5 / 10 min: the first five pass the gate (later attempts may still
+    // hit the (user, product) uniqueness conflict, which is a different,
+    // non-throttle rejection); the sixth is throttled.
+    const results: Array<Awaited<ReturnType<typeof submitReviewAction>>> = [];
+    for (let i = 0; i < 6; i += 1) {
+      results.push(
+        await submitReviewAction({ productId, rating: 5 - (i % 5), title: `Run ${i}` }),
+      );
+    }
+    const throttle = "You have submitted several reviews recently.";
+    const errOf = (r: Awaited<ReturnType<typeof submitReviewAction>>): string => (r.ok ? "" : r.error);
+    expect(
+      results.slice(0, 5).map(errOf),
+      "first five attempts must not be throttled",
+    ).not.toContain(throttle);
+    expect(results[5].ok).toBe(false);
+    expect(errOf(results[5])).toContain(throttle);
+
+    // The loop created real review rows for this (user, product) pair; later
+    // suites in this file rely on a clean slate.
+    await testDb.delete(reviews).where(eq(reviews.productId, productId));
+    await testDb.delete(rateLimit).where(like(rateLimit.key, `reviews:submit:${userA}`));
   });
 });
 

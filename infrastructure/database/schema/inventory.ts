@@ -92,6 +92,14 @@ export const inventoryMovements = pgTable(
 
     notes: text("notes"),
 
+    // Audit trail (migration 0032): acting principal for this movement,
+    // same actor vocabulary as the order ledger (order_status_histories,
+    // migration 0017). Nullable — historical rows and automation without a
+    // principal stay NULL rather than a fabricated identifier.
+    actorType: text("actor_type"),
+
+    actorId: text("actor_id"),
+
     createdAt: timestamp("created_at", {
       mode: "date",
     })
@@ -120,6 +128,10 @@ export const inventoryMovements = pgTable(
 
     index("inventory_movement_created_at_idx").on(
       table.createdAt,
+    ),
+
+    index("inventory_movement_actor_id_idx").on(
+      table.actorId,
     ),
   ],
 );

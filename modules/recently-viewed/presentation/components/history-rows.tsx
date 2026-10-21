@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { toast } from "sonner";
 
 import { Button } from "@/shared/components/ui/button";
@@ -42,16 +43,18 @@ export function HistoryRow({
   return (
     <li className="flex gap-4 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
       <Link
-        href={`/products/${item.productId}`}
+        href={`/products/${item.slug}`}
         className="relative block h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-secondary"
         aria-label={`View ${item.productName}`}
       >
         {item.primaryImageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          // Cloudinary is allowlisted in images.remotePatterns.
+          <Image
             src={item.primaryImageUrl}
             alt={item.primaryImageAlt ?? item.productName}
-            className="h-full w-full object-cover"
+            fill
+            sizes="80px"
+            className="object-cover"
           />
         ) : (
           <span className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
@@ -62,7 +65,7 @@ export function HistoryRow({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex items-start justify-between gap-2">
           <Link
-            href={`/products/${item.productId}`}
+            href={`/products/${item.slug}`}
             className="truncate text-sm font-semibold hover:underline"
           >
             {item.productName}

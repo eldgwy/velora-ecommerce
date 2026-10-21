@@ -75,7 +75,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`,
       name: "Cart Product",
       status: "ACTIVE",
       basePrice: "20.00",
@@ -109,7 +109,7 @@ beforeAll(async () => {
 
   const [archProd] = await testDb
     .insert(products)
-    .values({
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`,
       name: "Archived Product",
       status: "ARCHIVE",
       basePrice: "15.00",

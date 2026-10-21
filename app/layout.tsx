@@ -1,9 +1,16 @@
 import type { Metadata } from "next";
 import { DM_Serif_Display, Manrope } from "next/font/google";
+import dynamic from "next/dynamic";
 import "./globals.css";
-import SmoothScroll from "@/shared/components/providers/SmoothScroll";
 import { ThemeProvider } from "@/shared/components/providers/ThemeProvider";
 import { Toaster } from "@/shared/components/ui/sonner";
+import { env } from "@/config/env";
+
+// Lazily loaded: inertial scrolling must not sit in the first-paint bundle
+// (T-4.3/GP-36). Renders null; all work is in its effect.
+const SmoothScroll = dynamic(
+  () => import("@/shared/components/providers/SmoothScroll"),
+);
 
 const displayFont = DM_Serif_Display({
   variable: "--font-display",
@@ -19,6 +26,9 @@ const sansFont = Manrope({
 });
 
 export const metadata: Metadata = {
+  // GP-29: single canonical origin for all absolute URLs Next generates
+  // (Open Graph images, alternates, sitemap cross-references).
+  metadataBase: new URL(env.BETTER_AUTH_URL),
   title: {
     default: "VELORA — Modern Commerce",
     template: "%s — VELORA",

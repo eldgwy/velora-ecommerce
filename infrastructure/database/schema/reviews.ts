@@ -50,6 +50,14 @@ export const reviews = pgTable(
       .notNull()
       .default(false),
 
+    // Audit trail (migration 0032): who moderated this review and when.
+    // Written only on an actual transition; NULL for never-moderated rows.
+    moderatedBy: text("moderated_by"),
+
+    moderatedAt: timestamp("moderated_at", {
+      mode: "date",
+    }),
+
     createdAt: timestamp("created_at", {
       mode: "date",
     })

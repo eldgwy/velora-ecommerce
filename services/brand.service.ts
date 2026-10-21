@@ -47,8 +47,9 @@ export async function createBrand(
   requestId?: string,
 ): Promise<BrandRow> {
   const [created] = await db.insert(brands).values(data).returning();
+  if (!created) throw new Error("Brand insert returned no row");
   logger.catalog.brandCreated(created.id, userId ?? "unknown", requestId);
-  return created!;
+  return created;
 }
 
 export async function updateBrand(

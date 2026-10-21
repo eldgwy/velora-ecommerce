@@ -12,6 +12,7 @@ vi.mock("next/cache", () => ({
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
+import { purgeCategoryFixtures } from "../_fixture-cleanup";
 import {
   categories,
   brands,
@@ -27,6 +28,10 @@ let rootId = "",
   productId = "";
 
 beforeAll(async () => {
+  // Crash-residue hardening: a previous run wounded mid-suite must never
+  // poison this file's fixed-name fixtures. Cascade-safe purge keyed on our
+  // own static fixture slugs only (see _fixture-cleanup.ts).
+  await purgeCategoryFixtures(["agg-root", "agg-child"], ["agg-brand"]);
   const [root] = await testDb
     .insert(categories)
     .values({ slug: "agg-root", name: "Agg Root" })
@@ -44,7 +49,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`,
       name: "Agg Product",
       status: "ACTIVE",
       basePrice: "10.00",

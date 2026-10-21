@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
 import {
@@ -10,6 +10,9 @@ import {
   productImages,
   productVariants,
 } from "@/infrastructure/database/schema/catalog";
+import {
+  inventory,
+} from "@/infrastructure/database/schema/inventory";
 import {
   promotions,
   promotionProducts,
@@ -194,6 +197,159 @@ export async function resolveCatalogEntry(
     discountPerUnitCents: listCents - effectiveCents,
     weightGrams: variant.weightGrams ?? null,
   };
+}
+
+/**
+ * Batched twin of `resolveCatalogEntry` (T-4.1/GP-10): resolves a set of
+ * variants in a FIXED number of queries (variants, products, primary images,
+ * inventory, promotion candidates) regardless of N, instead of the per-item
+ * ~5-query loop the single resolver costs. Semantics mirror it exactly:
+ * - absent variant OR absent product row → the variant id is missing from
+ *   the map (callers branch on `undefined` exactly as they branched on
+ *   `null` before);
+ * - inventory availability = quantity - reserved_quantity; a missing
+ *   inventory row reports 0;
+ * - promotion candidates are windowed against ONE `now` sample for the
+ *   whole set and ordered by promotion id into the deterministic
+ *   `selectBestPromotion` (lowest effective price, id tie-break).
+ */
+export async function resolveCatalogEntries(
+  variantIds: string[],
+): Promise<Map<string, CatalogEntry>> {
+  const resolved = new Map<string, CatalogEntry>();
+  const uniqueIds = Array.from(new Set(variantIds));
+  if (uniqueIds.length === 0) return resolved;
+
+  const now = new Date();
+  const nowMs = now.getTime();
+
+  const [variantRows, inventoryRows] = await Promise.all([
+    db.select().from(productVariants).where(inArray(productVariants.id, uniqueIds)),
+    db
+      .select({
+        variantId: inventory.variantId,
+        quantity: inventory.quantity,
+        reservedQuantity: inventory.reservedQuantity,
+      })
+      .from(inventory)
+      .where(inArray(inventory.variantId, uniqueIds)),
+  ]);
+
+  const productIds = Array.from(new Set(variantRows.map((v) => v.productId)));
+
+  const [productRows, imageRows, candidateGroups] = await Promise.all([
+    productIds.length > 0
+      ? db.select().from(products).where(inArray(products.id, productIds))
+      : Promise.resolve<(typeof products.$inferSelect)[]>([]),
+    productIds.length > 0
+      ? db
+          .select({ productId: productImages.productId, url: productImages.url })
+          .from(productImages)
+          .where(
+            and(
+              inArray(productImages.productId, productIds),
+              eq(productImages.isPrimary, true),
+            ),
+          )
+      : Promise.resolve<{ productId: string; url: string }[]>([]),
+    fetchCartPromotionCandidates(productIds, now),
+  ]);
+
+  const productById = new Map(productRows.map((p) => [p.id, p]));
+  const imageByProductId = new Map(imageRows.map((i) => [i.productId, i.url]));
+  const availabilityByVariantId = new Map(
+    inventoryRows.map((i) => [i.variantId, i.quantity - i.reservedQuantity]),
+  );
+
+  for (const variant of variantRows) {
+    const product = productById.get(variant.productId);
+    if (!product) continue; // product vanished → same null contract as the single resolver
+
+    const listPrice = resolveVariantPrice(
+      { priceOverride: variant.priceOverride },
+      product.basePrice,
+    );
+    const listCents = toCents(listPrice);
+
+    const candidates = (candidateGroups.get(variant.productId) ?? []).filter(
+      (c) => c.endsAt === null || c.endsAt.getTime() >= nowMs,
+    );
+    const winner = selectBestPromotion(listCents, candidates);
+    const promotion = winner
+      ? { id: winner.id, name: winner.name, type: winner.type, value: winner.value }
+      : null;
+    const effectiveCents = promotion
+      ? applyPromotionToUnitPrice(listCents, {
+          type: promotion.type,
+          value: promotion.value,
+        })
+      : listCents;
+
+    resolved.set(variant.id, {
+      variantId: variant.id,
+      variantStatus: variant.status,
+      sku: variant.sku,
+      productId: product.id,
+      productName: product.name,
+      productStatus: product.status,
+      imageUrl: imageByProductId.get(variant.productId) ?? null,
+      listPrice,
+      availableStock: availabilityByVariantId.get(variant.id) ?? 0,
+      promotion,
+      effectivePrice: (effectiveCents / 100).toFixed(2),
+      discountPerUnitCents: listCents - effectiveCents,
+      weightGrams: variant.weightGrams ?? null,
+    });
+  }
+
+  return resolved;
+}
+
+/**
+ * One batched promotion-candidates query for many products — same window
+ * (`isActive`, started, ordered by promotion id; `endsAt` filtering stays
+ * caller-side exactly like `getBestActivePromotion`/fetchCandidates).
+ */
+async function fetchCartPromotionCandidates(
+  productIds: string[],
+  now: Date,
+): Promise<Map<string, Array<{ id: string; name: string; type: "PERCENTAGE" | "FIXED"; value: string; endsAt: Date | null }>>> {
+  const groups = new Map<
+    string,
+    Array<{ id: string; name: string; type: "PERCENTAGE" | "FIXED"; value: string; endsAt: Date | null }>
+  >();
+  if (productIds.length === 0) return groups;
+  const rows = await db
+    .select({
+      productId: promotionProducts.productId,
+      id: promotions.id,
+      name: promotions.name,
+      type: promotions.type,
+      value: promotions.value,
+      endsAt: promotions.endsAt,
+    })
+    .from(promotionProducts)
+    .innerJoin(promotions, eq(promotionProducts.promotionId, promotions.id))
+    .where(
+      and(
+        inArray(promotionProducts.productId, productIds),
+        eq(promotions.isActive, true),
+        lte(promotions.startsAt, now),
+      ),
+    )
+    .orderBy(promotions.id);
+  for (const row of rows) {
+    const list = groups.get(row.productId) ?? [];
+    list.push({
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      value: row.value,
+      endsAt: row.endsAt,
+    });
+    groups.set(row.productId, list);
+  }
+  return groups;
 }
 
 /**

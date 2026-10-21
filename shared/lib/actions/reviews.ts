@@ -27,17 +27,14 @@ export async function moderateReviewAction(
   }
 
   try {
-    // Queue policy: only PENDING reviews may be moderated here. Rejected
-    // reviews stay excluded permanently in this scope; the underlying
-    // service's re-evaluation ability is intentionally not exposed.
+    // Queue policy (T-5.4): moderation is revisable. Any status change is
+    // legal — re-opening a moderated review back to pending, direct flips
+    // between moderated states, and first-time pending decisions. Review
+    // content is intentionally immutable (customer-authored record); the
+    // same-status case is a safe no-op that surfaces `changed: false`.
     const current = await getReviewById(parsed.data.reviewId);
     if (!current) {
       return { error: "Review not found." };
-    }
-    if (current.status !== "pending") {
-      return {
-        error: `This review has already been moderated (${current.status}).`,
-      };
     }
 
     const result = await moderateReview(

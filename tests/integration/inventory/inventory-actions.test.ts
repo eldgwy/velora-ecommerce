@@ -19,6 +19,7 @@ vi.mock("@/shared/lib/guards", () => ({ requireAdmin: requireAdminSpy }));
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
+import { purgeCategoryFixtures } from "../_fixture-cleanup";
 import {
   categories,
   brands,
@@ -40,13 +41,17 @@ let rootId = "",
   inventoryId = "";
 
 beforeAll(async () => {
+  // Crash-residue hardening: a previous run wounded mid-suite must never
+  // poison this file's fixed-name fixtures. Cascade-safe purge keyed on our
+  // own static fixture slugs only (see _fixture-cleanup.ts).
+  await purgeCategoryFixtures(["ina-root", "ina-child"], ["ina-brand"]);
   const [root] = await testDb.insert(categories).values({ slug: "ina-root", name: "Ina Root" }).returning();
   rootId = root.id;
   const [child] = await testDb.insert(categories).values({ slug: "ina-child", name: "Ina Child", parentId: rootId }).returning();
   childId = child.id;
   const [br] = await testDb.insert(brands).values({ slug: "ina-brand", name: "Ina Brand" }).returning();
   brandId = br.id;
-  const [prod] = await testDb.insert(products).values({ name: "Ina Product", status: "ACTIVE", basePrice: "10.00", categoryId: childId, brandId }).returning();
+  const [prod] = await testDb.insert(products).values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "Ina Product", status: "ACTIVE", basePrice: "10.00", categoryId: childId, brandId }).returning();
   productId = prod.id;
   const [variant] = await testDb.insert(productVariants).values({ productId, sku: "INA-SKU-001", status: "ACTIVE", priceOverride: "12.00" }).returning();
   variantId = variant.id;

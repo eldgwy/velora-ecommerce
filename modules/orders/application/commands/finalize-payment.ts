@@ -15,6 +15,7 @@ import {
   InvalidOrderTransitionError,
   InsufficientStockForOrderError,
 } from "@/modules/orders/domain/errors/order-errors";
+import { commitReservationInventory } from "@/modules/orders/application/commands/reserve-order-inventory";
 
 export type OrderStatus = (typeof orderStatusEnum.enumValues)[number];
 export type OrderPaymentStatus = (typeof orderPaymentStatusEnum.enumValues)[number];
@@ -273,73 +274,23 @@ export async function finalizeOrderPayment(
       throw new InvalidOrderTransitionError("No active reservations to finalize");
     }
 
-    // 7. Aggregate quantities by variant for locking
-    const variantQuantities = new Map<string, number>();
-    for (const item of reservedItems) {
-      const existing = variantQuantities.get(item.variantId) ?? 0;
-      variantQuantities.set(item.variantId, existing + item.quantity);
-    }
+    // 7-10. Commit the reservation through the single shared lifecycle path
+    // (per-variant aggregation, row locking, stock decrement, SALE
+    // movements, RESERVED → COMMITTED) inside this transaction.
+    const committedItems = await commitReservationInventory(tx, orderId, {
+      actorId: options.actorId ?? "webhook",
+      requestId: options.requestId,
+      movementReason: `Order ${orderId} fulfilled (payment ${paymentId})`,
+    });
 
-    const sortedVariantIds = Array.from(variantQuantities.keys()).sort();
-
-    // 8. Lock inventory rows for all variants
-    const inventoryMap = await lockInventoryForVariants(tx, sortedVariantIds);
-
-    // 9. Verify inventory availability and process each variant
-    const fulfilledItems: Array<{ orderItemId: string; variantId: string; quantity: number }> = [];
-
-    for (const item of reservedItems) {
-      const inv = inventoryMap.get(item.variantId);
-      if (!inv) {
-        throw new InsufficientStockForOrderError(`No inventory record for variant: ${item.variantId}`);
-      }
-
-      const totalQuantity = variantQuantities.get(item.variantId)!;
-      const newQuantity = inv.quantity - totalQuantity;
-      const newReserved = inv.reservedQuantity - totalQuantity;
-
-      if (newQuantity < 0 || newReserved < 0) {
-        throw new InsufficientStockForOrderError(
-          `Insufficient stock for variant ${item.variantId}: quantity ${inv.quantity}, reserved ${inv.reservedQuantity}, needed ${totalQuantity}`,
-        );
-      }
-
-      // Update inventory: decrease both quantity and reservedQuantity
-      await tx
-        .update(inventory)
-        .set({ quantity: newQuantity, reservedQuantity: newReserved, updatedAt: new Date() })
-        .where(eq(inventory.id, inv.id));
-
-      // Record SALE movement
-      await tx.insert(inventoryMovements).values({
-        inventoryId: inv.id,
-        quantity: -totalQuantity,
-        type: "SALE",
-        reason: `Order ${orderId} fulfilled (payment ${paymentId})`,
-      });
-
-      logger.catalog.inventoryAdjusted(
-        inv.id,
-        item.variantId,
-        "SALE",
-        -totalQuantity,
-        options.actorId ?? "webhook",
-        options.requestId,
-      );
-
-      fulfilledItems.push({
-        orderItemId: item.id,
+    const fulfilledItems: Array<{ orderItemId: string; variantId: string; quantity: number }> =
+      committedItems.map((item) => ({
+        orderItemId: item.orderItemId,
         variantId: item.variantId,
         quantity: item.quantity,
-      });
-    }
+      }));
 
-    // 10. Mark order items as COMMITTED
-    const reservedItemIds = reservedItems.map((item) => item.id);
-    await tx
-      .update(orderItems)
-      .set({ reservationStatus: "COMMITTED", updatedAt: new Date() })
-      .where(inArray(orderItems.id, reservedItemIds));
+    // (Items were marked COMMITTED by commitReservationInventory.)
 
     // 11. Update order status
     const newOrderStatus: OrderStatus = "PROCESSING";
@@ -529,6 +480,8 @@ export async function handlePaymentFailureWebhook(
               quantity: -totalQuantity,
               type: "RELEASE",
               reason: options.reason ?? `Payment ${paymentId} failed`,
+              actorType: "webhook",
+              actorId: options.actorId,
             });
 
             logger.catalog.inventoryAdjusted(

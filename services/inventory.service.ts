@@ -48,6 +48,13 @@ export class InvalidQuantityError extends Error {
   }
 }
 
+export class InventoryRowGoneError extends Error {
+  constructor(inventoryId: string) {
+    super(`Inventory row ${inventoryId} vanished mid-transaction`);
+    this.name = "InventoryRowGoneError";
+  }
+}
+
 /**
  * Inventory availability rule used everywhere in the catalog:
  *   available = quantity - reserved_quantity
@@ -191,6 +198,9 @@ export async function adjustStock(
       .set({ quantity: newQuantity, updatedAt: new Date() })
       .where(eq(inventory.id, cur.id))
       .returning();
+    // The row was read under lock a few lines above; an empty returning
+    // would mean concurrent deletion or state corruption — fail loudly.
+    if (!updated) throw new InventoryRowGoneError(cur.id);
 
     await tx.insert(inventoryMovements).values({
       inventoryId: updated.id,
@@ -198,6 +208,10 @@ export async function adjustStock(
       type,
       reason: options.reason,
       notes: options.notes,
+      // adjustStock is reached only through the admin console action today;
+      // an anonymous (null) actor is automation and is labelled accordingly.
+      actorType: actorId ? "admin" : "system",
+      actorId,
     });
 
     // Check and create/resolve low-stock alert after stock adjustment
@@ -252,6 +266,7 @@ export async function setStock(
       .set({ quantity, updatedAt: new Date() })
       .where(eq(inventory.id, cur.id))
       .returning();
+    if (!updated) throw new InventoryRowGoneError(cur.id);
 
     await tx.insert(inventoryMovements).values({
       inventoryId: updated.id,
@@ -259,6 +274,9 @@ export async function setStock(
       type: "ADJUSTMENT",
       reason: options.reason,
       notes: options.notes,
+      // setStock is reached only through the admin console action today.
+      actorType: actorId ? "admin" : "system",
+      actorId,
     });
 
     // Check and create/resolve low-stock alert after stock adjustment
@@ -319,6 +337,7 @@ export async function adjustReservation(
       .set({ reservedQuantity: newReserved, updatedAt: new Date() })
       .where(eq(inventory.id, cur.id))
       .returning();
+    if (!updated) throw new InventoryRowGoneError(cur.id);
 
     await tx.insert(inventoryMovements).values({
       inventoryId: updated.id,
@@ -326,6 +345,8 @@ export async function adjustReservation(
       type,
       reason: options.reason,
       notes: options.notes,
+      actorType: actorId ? "admin" : "system",
+      actorId,
     });
 
     // Check and create/resolve low-stock alert after reservation adjustment

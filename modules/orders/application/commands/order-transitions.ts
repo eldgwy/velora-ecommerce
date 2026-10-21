@@ -70,6 +70,29 @@ export async function claimNotification(
   return rows.length > 0;
 }
 
+/**
+ * Pre-send lease for the synchronous dispatch path (GP-23b / T-3.4). CAS
+ * QUEUED -> SENDING before the SMTP call so the retry worker's `claimDueRow`
+ * cannot claim the same row while it is in flight (a crash then always
+ * leaves either a lease the worker reaps or a backoff row). Returns false
+ * when a concurrent worker already leased the row — the dispatch path must
+ * skip instead of sending a duplicate.
+ */
+export async function startNotificationDispatch(
+  orderId: string,
+  type: string,
+): Promise<boolean> {
+  const rows = (await db.execute(sql`
+    UPDATE order_notifications
+    SET status = 'SENDING', updated_at = now()
+    WHERE order_id = ${orderId}
+      AND type = ${type}
+      AND status = 'QUEUED'
+    RETURNING id
+  `)) as Array<{ id: string }>;
+  return rows.length > 0;
+}
+
 export async function markNotificationSent(
   orderId: string,
   type: string,

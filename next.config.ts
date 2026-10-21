@@ -38,15 +38,26 @@ const securityHeaders = [
       ]
     : []),
   // Content Security Policy
+  // origins locked to the actual integration flows:
+  //   Stripe Payment Element (modules/checkout/.../stripe-payment-form.tsx):
+  //     script + frame share https://js.stripe.com (loadStripe injects the
+  //     SDK itself; the Element renders inside a js.stripe.com iframe);
+  //     api.stripe.com serves REST calls, m.stripe.network the fraud SDK.
+  //   Cloudinary direct upload (review/banner/collection upload components):
+  //     browser PUTs go to https://api.cloudinary.com; display images are
+  //     covered by img-src https.
+  // 'unsafe-eval' is dev-only: Next.js dev tooling (react-refresh) needs it;
+  // production never does.
   {
     key: "Content-Security-Policy",
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
+      `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"} https://js.stripe.com`,
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: https: blob:",
-      "connect-src 'self' https://api.velora.example.com wss://api.velora.example.com",
+      "connect-src 'self' https://api.stripe.com https://m.stripe.network https://api.cloudinary.com",
+      "frame-src https://js.stripe.com",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

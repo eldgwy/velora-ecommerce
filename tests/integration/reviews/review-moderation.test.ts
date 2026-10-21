@@ -79,7 +79,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({ name: "RM Product", status: "ACTIVE", basePrice: "10.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "RM Product", status: "ACTIVE", basePrice: "10.00", categoryId, brandId })
     .returning();
   productId = prod.id;
   await testDb.insert(productVariants).values({ productId, sku: `RM-SKU-${SFX}`, status: "ACTIVE" });
@@ -103,7 +103,10 @@ beforeEach(async () => {
 describe("moderation queue", () => {
   it("lists pending reviews with product and author context", async () => {
     await insertReview({ rating: 5, status: "pending", title: "Queue me", userId: customerId });
-    const res = await getModerationQueueAction({ status: "pending" });
+    // Scoped to this fixture's product: the moderation queue is global by
+    // design, and an unfiltered totalCount(==1) counts rows any concurrently
+    // running suite inserted — an inherently racy cross-file assumption.
+    const res = await getModerationQueueAction({ status: "pending", productId });
     expect(res.ok).toBe(true);
     if (!res.ok || !res.data) throw new Error("expected ok");
     expect(res.data.totalCount).toBe(1);
@@ -125,16 +128,31 @@ describe("moderation queue", () => {
     expect(rejected).toEqual({ id: id2, changed: true });
   });
 
-  it("refuses to moderate already-moderated reviews", async () => {
-    const id = await insertReview({ rating: 5, status: "approved" });
+  // T-5.4: the old "refuses already-moderated" policy was product-approved
+  // for replacement with a revisable moderation flow. The same fixtures now
+  // assert the new semantics: direct flips and re-open succeed, the audit
+  // columns record the latest action, and content is untouched.
+  it("re-moderates already-moderated reviews (flip, re-open, audit)", async () => {
+    const id = await insertReview({ rating: 5, status: "approved", title: "Flip me" });
     const res = await moderateReviewAction({ reviewId: id, status: "rejected" });
-    expect(res).toEqual({ error: "This review has already been moderated (approved)." });
+    expect(res).toEqual({ id, changed: true });
     const [row] = await testDb.select().from(reviews).where(eq(reviews.id, id));
-    expect(row!.status).toBe("approved");
+    expect(row!.status).toBe("rejected");
+    expect(row!.moderatedBy).toBe("test-mod");
+    expect(row!.moderatedAt).not.toBeNull();
+    expect(row!.title).toBe("Flip me"); // content immutable under re-moderation
 
     const rid = await insertReview({ rating: 1, status: "rejected" });
-    const res2 = await moderateReviewAction({ reviewId: rid, status: "approved" });
-    expect(res2).toEqual({ error: "This review has already been moderated (rejected)." });
+    const res2 = await moderateReviewAction({ reviewId: rid, status: "pending" });
+    expect(res2).toEqual({ id: rid, changed: true });
+    const [row2] = await testDb.select().from(reviews).where(eq(reviews.id, rid));
+    expect(row2!.status).toBe("pending");
+  });
+
+  it("same-status replay is a safe no-op (changed: false)", async () => {
+    const id = await insertReview({ rating: 3, status: "approved" });
+    const res = await moderateReviewAction({ reviewId: id, status: "approved" });
+    expect(res).toEqual({ id, changed: false });
   });
 
   it("rejects unauthorized moderators without leaking data", async () => {

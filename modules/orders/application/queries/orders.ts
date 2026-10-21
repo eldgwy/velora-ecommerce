@@ -138,10 +138,11 @@ export async function listCustomerOrders(
     .limit(limit)
     .offset(offset);
 
-  const [{ count }] = await db
+  const [countRow] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(orders)
     .where(eq(orders.userId, userId));
+  const count = countRow?.count ?? 0;
 
   const itemCounts = rows.length > 0
     ? await db
@@ -226,11 +227,12 @@ export async function listOrdersForAdmin(filters: AdminOrderFilters = {}): Promi
     .limit(limit)
     .offset(offset);
 
-  const [{ count }] = await db
+  const [countRow] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(orders)
     .leftJoin(user, eq(user.id, orders.userId))
     .where(where);
+  const count = countRow?.count ?? 0;
 
   const itemCounts = rows.length > 0
     ? await db

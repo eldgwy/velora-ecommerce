@@ -190,25 +190,46 @@ The worker emits structured logs:
 
 ### Health Check Endpoint
 
-Add a health check for the worker:
+`GET /api/health` is the operational health probe (implemented in
+`app/api/health/route.ts`, T-2.7): it round-trips `SELECT 1` against the live
+database pool, reports presence (never values) of operationally meaningful
+optional env keys, responds `200` when healthy and `503` when the database is
+down, and is never cached (`force-dynamic` + `Cache-Control: no-store`).
 
-```typescript
-// app/api/internal/jobs/health/route.ts
-export async function GET() {
-  return Response.json({ 
-    status: "healthy", 
-    timestamp: new Date().toISOString(),
-    worker: "expired-reservations"
-  });
-}
+For job-specific liveness, call the job endpoints themselves with the cron
+secret — a healthy response returns the worker's real run statistics:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" \
+  https://your-app.vercel.app/api/internal/jobs/expire-reservations
 ```
 
 ## Manual Recovery Procedures
 
-### 1. Re-run for Specific Orders
+> **Never raw-UPDATE state directly.** The earlier draft of this document
+> suggested bypassing the domain with direct `UPDATE orders/...` and
+> `UPDATE order_items SET reservation_status = 'RELEASED'` SQL. Those
+> procedures were objectively wrong (GP-18): releasing a reservation without
+> the domain operation leaves `inventory.reserved` unchanged, so stock is
+> then permanently seen as reserved — and forced order-status writes skip
+> the state machine, history, and notification steps entirely. Recovery
+> goes through the worker, which reuses `handleCheckoutExpiration` and is
+> idempotent w.r.t. already-released rows.
+
+### 1. Re-run the Worker for the Current Window
+
+The manual invocation runs the exact logic the cron runs:
 
 ```bash
-# Find stuck orders
+pnpm tsx scripts/expired-reservations-worker.ts          # standalone mode
+# or, against a deployment (idempotent; safe to repeat):
+curl -H "Authorization: Bearer $CRON_SECRET" -X POST \
+  https://your-app.vercel.app/api/internal/jobs/expire-reservations
+```
+
+### 2. Inspect Stuck Orders (read-only)
+
+```bash
 psql $DATABASE_URL -c "
   SELECT id, order_number, checkout_expires_at, status, payment_status
   FROM orders
@@ -220,44 +241,18 @@ psql $DATABASE_URL -c "
       WHERE oi.order_id = orders.id AND oi.reservation_status = 'RESERVED'
     );
 "
-
-# Manually trigger expiration for a specific order
-psql $DATABASE_URL -c "
-  SELECT * FROM handle_checkout_expiration('ORDER_UUID_HERE');
-"
 ```
 
-### 2. Force Release Reservations
+There is no `handle_checkout_expiration` SQL function — expiration logic
+lives exclusively in the TypeScript domain
+(`modules/orders/application/commands/order-lifecycle.ts`), so any
+"call the function" instructions were inaccurate and were removed.
 
-If the worker is down and reservations need immediate release:
-
-```bash
-# Direct database update (use with caution)
-psql $DATABASE_URL -c "
-  UPDATE order_items
-  SET reservation_status = 'RELEASED', updated_at = NOW()
-  WHERE reservation_status = 'RESERVED'
-    AND order_id IN (
-      SELECT id FROM orders
-      WHERE checkout_expires_at < NOW()
-        AND status IN ('PENDING', 'PROCESSING')
-    );
-"
-```
-
-### 3. Clear Stuck Processing State
-
-If orders are stuck in "PROCESSING" due to a crashed worker:
-
-```bash
-psql $DATABASE_URL -c "
-  UPDATE orders
-  SET status = 'CANCELLED', payment_status = 'EXPIRED', updated_at = NOW()
-  WHERE status = 'PROCESSING'
-    AND payment_status = 'PENDING'
-    AND checkout_expires_at < NOW() - INTERVAL '1 hour';
-"
-```
+> If an order must be escalated when the worker cannot release it
+> (e.g. integrity constraint failures), escalate to a reviewed, tested
+> remediation script rather than ad-hoc SQL: an ad-hoc release that skips
+> inventory decrees is precisely the failure this section exists to
+> prevent.
 
 ## Testing
 
@@ -282,22 +277,25 @@ The test suite covers:
 
 ### Manual Testing
 
+Prefer the integration suite — it already covers the worker against a real
+database, including the expired-window and duplicate-execution cases
+(`tests/integration/orders/reserve-order-inventory.test.ts`, suite
+"expired reservation worker"):
+
 ```bash
-# Create an order with expired checkout
-psql $DATABASE_URL -c "
-  INSERT INTO orders (id, order_number, user_id, status, ..., checkout_expires_at)
-  VALUES ('test-uuid', 'ORD-TEST', 'user-1', 'PENDING', ..., NOW() - INTERVAL '1 hour');
-"
+pnpm vitest run tests/integration/orders/reserve-order-inventory.test.ts -t "expired reservation worker"
+```
 
-# Run worker manually
-pnpm tsx scripts/expired-reservations-worker.ts
+Verify reservation state directly (read-only; note the `uuid` column types —
+string ids like `'test-uuid'` will not insert):
 
-# Verify reservations released
+```bash
 psql $DATABASE_URL -c "
   SELECT o.order_number, oi.reservation_status
   FROM orders o
   JOIN order_items oi ON oi.order_id = o.id
-  WHERE o.id = 'test-uuid';
+  WHERE o.status = 'PENDING'
+    AND o.checkout_expires_at < NOW();
 "
 ```
 

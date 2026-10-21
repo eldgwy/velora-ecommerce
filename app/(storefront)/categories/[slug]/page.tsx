@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { getCategoryBySlug, listProducts } from "@/services/catalog-public";
+import { formatUsdInDisplayCurrency } from "@/shared/lib/currency-display";
+import { buildDisplayCurrencyProps } from "@/shared/lib/currency-display-server";
+import type { CardDisplayCurrency } from "@/shared/components/product/ProductCard";
 
 interface CategoryPageProps {
   params: Promise<{ slug: string }>;
@@ -15,6 +18,7 @@ export async function generateMetadata({ params }: CategoryPageProps): Promise<M
   return {
     title: category.name,
     description: category.description ?? undefined,
+    alternates: { canonical: `/categories/${slug}` },
   };
 }
 
@@ -31,6 +35,7 @@ async function CategoryContent({ params }: CategoryPageProps) {
 
   // Get products in this category
   const { items: products } = await listProducts({ categorySlug: category.slug, pageSize: 24 });
+  const display = await buildDisplayCurrencyProps();
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -98,7 +103,7 @@ async function CategoryContent({ params }: CategoryPageProps) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
+              <ProductCard key={product.id} product={product} display={display} />
             ))}
           </div>
         )}
@@ -107,7 +112,13 @@ async function CategoryContent({ params }: CategoryPageProps) {
   );
 }
 
-function ProductCard({ product }: { product: Awaited<ReturnType<typeof listProducts>>["items"][0] }) {
+function ProductCard({
+  product,
+  display,
+}: {
+  product: Awaited<ReturnType<typeof listProducts>>["items"][0];
+  display?: CardDisplayCurrency | null;
+}) {
   return (
     <Link href={`/products/${product.slug}`} className="group block">
       <div className="aspect-square relative overflow-hidden rounded-lg bg-muted">
@@ -126,9 +137,17 @@ function ProductCard({ product }: { product: Awaited<ReturnType<typeof listProdu
       <div className="mt-3 space-y-1">
         <h3 className="font-medium line-clamp-1 group-hover:text-primary transition-colors">{product.name}</h3>
         <div className="flex items-center gap-2">
-          <span className="text-lg font-semibold">{formatPrice(product.minVariantPrice ?? product.basePrice)}</span>
+          <span className="text-lg font-semibold">
+            {formatUsdInDisplayCurrency(
+              product.minVariantPrice ?? product.basePrice,
+              display?.currency ?? "USD",
+              display?.rates ?? {},
+            )}
+          </span>
           {product.comparePrice && Number(product.comparePrice) > Number(product.basePrice) && (
-            <span className="text-sm line-through text-muted-foreground">{formatPrice(product.comparePrice)}</span>
+            <span className="text-sm line-through text-muted-foreground">
+              {formatUsdInDisplayCurrency(product.comparePrice, display?.currency ?? "USD", display?.rates ?? {})}
+            </span>
           )}
         </div>
         {product.brand && (
@@ -137,10 +156,6 @@ function ProductCard({ product }: { product: Awaited<ReturnType<typeof listProdu
       </div>
     </Link>
   );
-}
-
-function formatPrice(price: string): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(price));
 }
 
 export default CategoryContent;

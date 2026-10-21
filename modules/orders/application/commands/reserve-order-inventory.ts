@@ -5,6 +5,11 @@ import { inventory, inventoryMovements, orderItems } from "@/infrastructure/data
 import { orderReservationStatusEnum } from "@/infrastructure/database/schema/enums";
 import { productVariants } from "@/infrastructure/database/schema/catalog";
 import { logger } from "@/shared/lib/logging/logger";
+import type { OrderActor } from "@/modules/orders/domain/rules/order-transitions";
+import {
+  checkAndCreateLowStockAlert,
+  checkAndResolveLowStockAlert,
+} from "@/modules/inventory/application/low-stock-alerts";
 import {
   OrderNotFoundError,
   OrderItemNotFoundError,
@@ -86,7 +91,9 @@ function assertValidQuantity(value: number, label: string): void {
 
 export async function reserveOrderInventory(
   orderId: string,
-  options: { actorId?: string; requestId?: string } = {},
+  // actorType: "customer" at checkout; automation callers (expiry/release
+  // workers) stay "system" unless they pass something better.
+  options: { actorId?: string; actorType?: OrderActor; requestId?: string } = {},
 ): Promise<ReservationResult> {
   return db.transaction(async (tx) => {
     const orderItemsRows = await tx
@@ -161,6 +168,8 @@ export async function reserveOrderInventory(
         quantity: totalQuantity,
         type: "RESERVATION",
         reason: `Order ${orderId} reservation`,
+        actorType: options.actorType ?? "system",
+        actorId: options.actorId,
       });
 
       logger.catalog.inventoryAdjusted(
@@ -171,6 +180,25 @@ export async function reserveOrderInventory(
         options.actorId ?? "unknown",
         options.requestId,
       );
+
+      // GP-16: available (quantity − reserved) just dropped by the reserved
+      // amount, so this is a checkout-path threshold crossing. Evaluated in
+      // the same transaction — the inventory row is FOR UPDATE-locked here,
+      // which serializes same-variant crossings and keeps the alert table's
+      // in-status dedupe effective. Best-effort: an alert write failure must
+      // not abort a customer checkout; the delivery job can pick the row up
+      // on the next sweep.
+      try {
+        await checkAndCreateLowStockAlert(tx, variantId, options);
+      } catch (error) {
+        logger.error("Low-stock alert evaluation failed during reservation", {
+          module: "orders",
+          action: "reserveLowStockAlert",
+          variantId,
+          orderId,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
     }
 
     // Atomically update order items status from PENDING to RESERVED
@@ -214,7 +242,9 @@ export async function reserveOrderInventory(
 
 export async function releaseOrderReservation(
   orderId: string,
-  options: { actorId?: string; requestId?: string; reason?: string } = {},
+  // actorType: threaded from the lifecycle audit context (cancel paths carry
+  // the real initiator); release automation stays "system".
+  options: { actorId?: string; actorType?: OrderActor; requestId?: string; reason?: string } = {},
 ): Promise<void> {
   return db.transaction(async (tx) => {
     // First, check if order exists and get its items
@@ -279,6 +309,8 @@ export async function releaseOrderReservation(
         quantity: -totalQuantity,
         type: "RELEASE",
         reason: options.reason ?? `Order ${orderId} reservation released`,
+        actorType: options.actorType ?? "system",
+        actorId: options.actorId,
       });
 
       logger.catalog.inventoryAdjusted(
@@ -289,6 +321,22 @@ export async function releaseOrderReservation(
         options.actorId ?? "unknown",
         options.requestId,
       );
+
+      // GP-16: available (quantity − reserved) just rose, so an existing
+      // PENDING/PROCESSING alert for the variant may now be resolvable.
+      // Same-transaction evaluation locks the inventory row earlier in this
+      // transaction; best-effort for checkout/release resilience.
+      try {
+        await checkAndResolveLowStockAlert(tx, variantId, options);
+      } catch (error) {
+        logger.error("Low-stock alert resolution failed during release", {
+          module: "orders",
+          action: "releaseLowStockAlert",
+          variantId,
+          orderId,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
     }
 
     // Atomically update order items status from RESERVED to RELEASED
@@ -323,72 +371,159 @@ export async function releaseOrderReservation(
   });
 }
 
-export async function commitOrderReservation(
+export interface CommittedOrderItem {
+  orderItemId: string;
+  variantId: string;
+  quantity: number;
+}
+
+export interface CommitReservationOptions {
+  actorId?: string;
+  /** Actor class for the audit row; payment-driven commit defaults to "webhook". */
+  actorType?: OrderActor;
+  requestId?: string;
+  /** Overrides the default SALE movement audit reason (e.g. finalize enriches it with the payment id). */
+  movementReason?: string;
+}
+
+type ReservationTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Single canonical "commit reservation" lifecycle: aggregate per variant,
+ * lock inventory rows, decrement quantity + reserved, record SALE
+ * movements, and mark RESERVED items COMMITTED. Opened inside the caller's
+ * transaction — callers holding row locks (finalize-payment) pass their
+ * client here instead of opening a second transaction, which would
+ * deadlock on the same rows.
+ */
+export async function commitReservationInventory(
+  tx: ReservationTx,
   orderId: string,
-  options: { actorId?: string; requestId?: string } = {},
-): Promise<void> {
-  return db.transaction(async (tx) => {
-    const reservedItems = await tx
-      .select({
-        id: orderItems.id,
-        variantId: orderItems.variantId,
-        quantity: orderItems.quantity,
-        reservationStatus: orderItems.reservationStatus,
-      })
-      .from(orderItems)
-      .where(eq(orderItems.orderId, orderId));
+  options: CommitReservationOptions = {},
+): Promise<CommittedOrderItem[]> {
+  const reservedItems = await tx
+    .select({
+      id: orderItems.id,
+      variantId: orderItems.variantId,
+      quantity: orderItems.quantity,
+      reservationStatus: orderItems.reservationStatus,
+    })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, orderId));
 
-    const toCommit = reservedItems.filter((item) => item.reservationStatus === "RESERVED");
-    if (toCommit.length === 0) {
-      return;
+  const toCommit = reservedItems.filter((item) => item.reservationStatus === "RESERVED");
+  if (toCommit.length === 0) {
+    return [];
+  }
+
+  // Aggregate quantities per variant from the committed set: finalization
+  // decrements each variant exactly once, even if the order holds multiple
+  // lines for the same variant.
+  const variantQuantities = new Map<string, number>();
+  for (const item of toCommit) {
+    const existing = variantQuantities.get(item.variantId) ?? 0;
+    variantQuantities.set(item.variantId, existing + item.quantity);
+  }
+
+  const sortedVariantIds = Array.from(variantQuantities.keys()).sort();
+
+  const lockedInventory = await lockInventoryForVariants(tx, sortedVariantIds);
+
+  for (const [variantId, totalQuantity] of variantQuantities) {
+    const inv = lockedInventory.get(variantId);
+    if (!inv) {
+      throw new InsufficientStockForOrderError(`No inventory record for variant: ${variantId}`);
     }
 
-    const variantQuantities = new Map<string, number>();
-    for (const item of toCommit) {
-      const existing = variantQuantities.get(item.variantId) ?? 0;
-      variantQuantities.set(item.variantId, existing + item.quantity);
-    }
+    const newQuantity = inv.quantity - totalQuantity;
+    const newReserved = inv.reservedQuantity - totalQuantity;
 
-    const sortedVariantIds = Array.from(variantQuantities.keys()).sort();
-
-    const lockedInventory = await lockInventoryForVariants(tx, sortedVariantIds);
-
-    for (const [variantId, totalQuantity] of variantQuantities) {
-      const inv = lockedInventory.get(variantId)!;
-
-      const newQuantity = inv.quantity - totalQuantity;
-      const newReserved = inv.reservedQuantity - totalQuantity;
-
-      if (newQuantity < 0 || newReserved < 0) {
-        throw new Error(`Committing ${totalQuantity} would make quantity or reserved negative for variant ${variantId}`);
-      }
-
-      await tx
-        .update(inventory)
-        .set({ quantity: newQuantity, reservedQuantity: newReserved, updatedAt: new Date() })
-        .where(eq(inventory.id, inv.id));
-
-      await tx.insert(inventoryMovements).values({
-        inventoryId: inv.id,
-        quantity: -totalQuantity,
-        type: "SALE",
-        reason: `Order ${orderId} fulfilled`,
-      });
-
-      logger.catalog.inventoryAdjusted(
-        inv.id,
-        variantId,
-        "SALE",
-        -totalQuantity,
-        options.actorId ?? "unknown",
-        options.requestId,
+    if (newQuantity < 0 || newReserved < 0) {
+      throw new InsufficientStockForOrderError(
+        `Insufficient stock for variant ${variantId}: quantity ${inv.quantity}, reserved ${inv.reservedQuantity}, needed ${totalQuantity}`,
       );
     }
 
-    const itemIdsToUpdate = toCommit.map((item) => item.id);
+    // Low-stock note: commit moves units out of the reservation (quantity
+    // and reserved drop by the same amount), so available (quantity −
+    // reserved) is unchanged and the threshold cannot newly cross here —
+    // reserve (GP-16 wiring) is the crossing point, release the resolver.
+
     await tx
-      .update(orderItems)
-      .set({ reservationStatus: "COMMITTED", updatedAt: new Date() })
+      .update(inventory)
+      .set({ quantity: newQuantity, reservedQuantity: newReserved, updatedAt: new Date() })
+      .where(eq(inventory.id, inv.id));
+
+    await tx.insert(inventoryMovements).values({
+      inventoryId: inv.id,
+      quantity: -totalQuantity,
+      type: "SALE",
+      reason: options.movementReason ?? `Order ${orderId} fulfilled`,
+      actorType: options.actorType ?? "webhook",
+      actorId: options.actorId,
+    });
+
+    logger.catalog.inventoryAdjusted(
+      inv.id,
+      variantId,
+      "SALE",
+      -totalQuantity,
+      options.actorId ?? "unknown",
+      options.requestId,
+    );
+  }
+
+  // Atomically mark the items COMMITTED (CAS on RESERVED so concurrent
+  // finalizations cannot double-apply), then report the fulfillment set.
+  const itemIdsToUpdate = toCommit.map((item) => item.id);
+  const updateResult = await tx
+    .update(orderItems)
+    .set({ reservationStatus: "COMMITTED", updatedAt: new Date() })
+    .where(
+      and(
+        inArray(orderItems.id, itemIdsToUpdate),
+        eq(orderItems.reservationStatus, "RESERVED"),
+      ),
+    )
+    .returning({ id: orderItems.id });
+
+  if (updateResult.length === 0) {
+    const currentItems = await tx
+      .select({ reservationStatus: orderItems.reservationStatus })
+      .from(orderItems)
       .where(inArray(orderItems.id, itemIdsToUpdate));
+
+    if (currentItems.length > 0 && currentItems.every((item) => item.reservationStatus === "COMMITTED")) {
+      // Idempotent: another finalization already committed these items.
+      return toCommit.map((item) => ({
+        orderItemId: item.id,
+        variantId: item.variantId,
+        quantity: item.quantity,
+      }));
+    }
+    if (currentItems.some((item) => item.reservationStatus === "RELEASED")) {
+      throw new OrderReservationReleasedError(orderId);
+    }
+    throw new InvalidOrderTransitionError("No active reservations to finalize");
+  }
+
+  return toCommit.map((item) => ({
+    orderItemId: item.id,
+    variantId: item.variantId,
+    quantity: item.quantity,
+  }));
+}
+
+/**
+ * Standalone commit for callers without an ambient transaction. The
+ * finalize-payment lifecycle uses commitReservationInventory directly to
+ * share its own transaction (one commit path for the whole lifecycle).
+ */
+export async function commitOrderReservation(
+  orderId: string,
+  options: CommitReservationOptions = {},
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await commitReservationInventory(tx, orderId, options);
   });
 }

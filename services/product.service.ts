@@ -127,8 +127,9 @@ export async function createProduct(
   requestId?: string,
 ): Promise<ProductRow> {
   const [created] = await db.insert(products).values(data).returning();
+  if (!created) throw new Error("Product insert returned no row");
   logger.catalog.productCreated(created.id, userId ?? "unknown", requestId);
-  return created!;
+  return created;
 }
 
 export async function updateProduct(

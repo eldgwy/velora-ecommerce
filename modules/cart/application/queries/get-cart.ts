@@ -5,7 +5,7 @@ import { cartItems } from "@/infrastructure/database/schema/cart";
 import { fromCents, subtotalCents } from "@/modules/cart/domain/rules/cart-rules";
 import {
   findActiveCartId,
-  resolveCatalogEntry,
+  resolveCatalogEntries,
   type CartOwner,
 } from "@/modules/cart/application/cart-context";
 
@@ -58,9 +58,13 @@ export async function getCartDetail(owner: CartOwner): Promise<CartDetail> {
     .from(cartItems)
     .where(eq(cartItems.cartId, cartId));
 
+  // T-4.1/GP-10: resolve the whole cart in one fixed batch instead of one
+  // ~5-query resolution per item.
+  const entries = await resolveCatalogEntries(rows.map((row) => row.variantId));
+
   const items: CartDetailItem[] = [];
   for (const row of rows) {
-    const entry = await resolveCatalogEntry(row.variantId);
+    const entry = entries.get(row.variantId);
     if (!entry) continue; // variant deleted mid-read; validation surfaces it
     const purchasable =
       entry.variantStatus === "ACTIVE" && entry.productStatus === "ACTIVE";

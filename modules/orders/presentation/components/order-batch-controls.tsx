@@ -27,6 +27,7 @@ export function OrderBatchControls({ orders }: { orders: OrderListItem[] }) {
   const toggle = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
+      // eslint-disable-next-line drizzle/enforce-delete-with-where -- state Set, not drizzle
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;

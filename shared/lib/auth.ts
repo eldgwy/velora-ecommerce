@@ -6,9 +6,15 @@ import { db } from "@/infrastructure/database";
 import { customerProfiles } from "@/infrastructure/database/schema/customers";
 import { env } from "@/config/env";
 import {
-  sendVerificationEmail as sendVerificationEmailMail,
-  sendPasswordResetEmail as sendPasswordResetEmailMail,
+  verificationEmailText,
+  passwordResetEmailText,
+  renderVerificationEmail,
+  renderPasswordResetEmail,
+  VERIFICATION_EMAIL_SUBJECT,
+  PASSWORD_RESET_EMAIL_SUBJECT,
 } from "@/shared/lib/mail";
+import { enqueueAuthEmail, dispatchAuthEmail } from "@/modules/notifications/application/auth-emails";
+import { logger } from "@/shared/lib/logging/logger";
 import type { UserRole, UserStatus } from "@/shared/lib/roles";
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -92,18 +98,40 @@ export const auth = betterAuth({
     // Password-reset links stay valid for 60 minutes (mirrors the email copy).
     resetPasswordTokenExpiresIn: 60 * 60,
     /**
-     * Fire-and-forget the SMTP send so the request never blocks on (or leaks
-     * the timing of) the mail server. The message always suggests the same
-     * copy whether or not the address exists, to keep account enumeration
-     * infeasible.
+     * Durable queue (GP-14 / T-3.3): the rendered email is stored in
+     * `auth_emails`; the first send is fired from the queue path (lease +
+     * retry semantics identical to order notifications). Fire-and-forget so
+     * the request never blocks on (or leaks the timing of) the mail server.
+     * The message always suggests the same copy whether or not the address
+     * exists, to keep account enumeration infeasible.
      */
     sendResetPassword: async ({ user, token }) => {
-      void sendPasswordResetEmailMail({
-        to: user.email,
-        name: user.name,
-        url: buildResetPasswordUrl(token),
-      }).catch((error: unknown) => {
-        console.error("[auth] Failed to send password reset email:", error);
+      void (async () => {
+        const firstName = user.name?.trim().split(/\s+/)[0] || "there";
+        const id = await enqueueAuthEmail({
+          userId: user.id,
+          eventType: "PASSWORD_RESET",
+          recipientEmail: user.email,
+          subject: PASSWORD_RESET_EMAIL_SUBJECT,
+          bodyHtml: renderPasswordResetEmail({
+            name: firstName,
+            email: user.email,
+            url: buildResetPasswordUrl(token),
+          }),
+          bodyText: passwordResetEmailText({
+            name: firstName,
+            url: buildResetPasswordUrl(token),
+          }),
+        });
+        if (id) await dispatchAuthEmail(id);
+      })().catch((error: unknown) => {
+        // The queued row (if any) is picked up by the retry worker; losing
+        // the dispatch only costs latency, not the link itself.
+        logger.error("[auth] Password reset email queue path failed", {
+          module: "auth",
+          action: "resetEmailQueuePath",
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
       });
     },
     // FR-01.05: kill every active session the moment the password changes.
@@ -184,17 +212,35 @@ export const auth = betterAuth({
     // Verification tokens stay valid for 24 hours (mirrors the email copy).
     expiresIn: 60 * 60 * 24,
     /**
-     * Fire-and-forget the SMTP send so sign-up never blocks on (or leaks the
-     * timing of) the mail server. Users can request a fresh link from the
-     * register screen, the navbar dropdown, or the login form.
+     * Durable queue (GP-14 / T-3.3) — same path as the reset email. Users
+     * can request a fresh link from the register screen, the navbar
+     * dropdown, or the login form.
      */
     sendVerificationEmail: async ({ user, token }) => {
-      void sendVerificationEmailMail({
-        to: user.email,
-        name: user.name,
-        url: buildVerificationUrl(token),
-      }).catch((error: unknown) => {
-        console.error("[auth] Failed to send verification email:", error);
+      void (async () => {
+        const firstName = user.name?.trim().split(/\s+/)[0] || "there";
+        const id = await enqueueAuthEmail({
+          userId: user.id,
+          eventType: "VERIFICATION",
+          recipientEmail: user.email,
+          subject: VERIFICATION_EMAIL_SUBJECT,
+          bodyHtml: renderVerificationEmail({
+            name: firstName,
+            email: user.email,
+            url: buildVerificationUrl(token),
+          }),
+          bodyText: verificationEmailText({
+            name: firstName,
+            url: buildVerificationUrl(token),
+          }),
+        });
+        if (id) await dispatchAuthEmail(id);
+      })().catch((error: unknown) => {
+        logger.error("[auth] Verification email queue path failed", {
+          module: "auth",
+          action: "verificationEmailQueuePath",
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
       });
     },
   },

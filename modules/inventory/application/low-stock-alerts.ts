@@ -1,7 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
-import { lowStockAlerts } from "@/infrastructure/database/schema";
+import {
+  lowStockAlerts,
+  lowStockAlertRecipients,
+} from "@/infrastructure/database/schema";
 import { lowStockAlertStatusEnum } from "@/infrastructure/database/schema/enums";
 import { logger } from "@/shared/lib/logging/logger";
 
@@ -116,6 +119,9 @@ export async function checkAndCreateLowStockAlert(
       attempts: 0,
     })
     .returning({ id: lowStockAlerts.id });
+  // Insert inside the caller's tx where this variant's inventory row is
+  // already locked; a missing returning row would be state corruption.
+  if (!alert) throw new Error("Low-stock alert insert returned no row");
 
   logger.warn("Low stock alert created", {
     module: "inventory",
@@ -215,15 +221,31 @@ export async function checkAndResolveLowStockAlert(
  * Get a pending alert for delivery.
  * Updates status to PROCESSING and increments attempts.
  */
+/**
+ * Claim the next deliverable alert for this worker: PENDING rows immediately
+ * (first attempt has no `last_attempt_at` yet), plus a bounded retry backoff
+ * for rows that already failed, plus lease-expiry reclaims of PROCESSING
+ * rows left behind by a crashed worker (GP-30's "no lease recovery" — the
+ * partial unique index keeps creating new alerts blocked while a stale
+ * PROCESSING row exists, so recovery is mandatory). The single
+ * UPDATE ... RETURNING with SKIP LOCKED serializes concurrent workers.
+ */
 export async function getNextPendingAlert(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  opts: { leaseMs?: number; retryDelayMs?: number } = {},
 ): Promise<LowStockAlertEvent | null> {
+  const leaseCutoff = sql`NOW() - INTERVAL '1 millisecond' * ${Math.max(0, opts.leaseMs ?? 10 * 60_000)}`;
+  const retryCutoff = sql`NOW() - INTERVAL '1 millisecond' * ${Math.max(0, opts.retryDelayMs ?? 60_000)}`;
   const result = await tx.execute(sql`
     UPDATE ${lowStockAlerts}
     SET status = 'PROCESSING', attempts = attempts + 1, last_attempt_at = NOW(), updated_at = NOW()
     WHERE id = (
       SELECT id FROM ${lowStockAlerts}
-      WHERE status = 'PENDING'
+      WHERE (
+        status = 'PENDING'
+        AND (last_attempt_at IS NULL OR last_attempt_at <= ${retryCutoff})
+      )
+      OR (status = 'PROCESSING' AND last_attempt_at < ${leaseCutoff})
       ORDER BY created_at ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED
@@ -233,7 +255,7 @@ export async function getNextPendingAlert(
 
   if (!result || result.length === 0) return null;
 
-  const row = result[0];
+  const row = result[0]!;
   return {
     id: row.id as string,
     inventoryId: row.inventoryId as string,
@@ -264,21 +286,61 @@ export async function markAlertDelivered(
 }
 
 /**
- * Mark an alert as failed and schedule retry.
+ * Recipients that have already received this alert (per-recipient ledger,
+ * migration 0035). Retries send ONLY to the complement — a requeue can no
+ * longer duplicate an email to an inbox that already got it.
+ */
+export async function getAlertDeliveredRecipients(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  alertId: string,
+): Promise<string[]> {
+  const rows = await tx
+    .select({ recipientEmail: lowStockAlertRecipients.recipientEmail })
+    .from(lowStockAlertRecipients)
+    .where(eq(lowStockAlertRecipients.alertId, alertId));
+  return rows.map((r) => r.recipientEmail);
+}
+
+/** Record one delivered recipient; idempotent via the unique ledger key. */
+export async function recordAlertRecipientDelivered(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  alertId: string,
+  recipientEmail: string,
+): Promise<void> {
+  await tx
+    .insert(lowStockAlertRecipients)
+    .values({ alertId, recipientEmail })
+    .onConflictDoNothing();
+}
+
+/**
+ * Mark an alert as failed and schedule retry. Once `attempts` reaches
+ * `maxRetries` the alert is parked as FAILED (terminal): the retry budget is
+ * exhausted and the partial unique index stops blocking a new alert for the
+ * same variant, so the next stock drop can raise a fresh one.
  */
 export async function markAlertFailed(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   alertId: string,
   errorMessage: string,
-): Promise<void> {
+  opts: { maxRetries?: number } = {},
+): Promise<"requeued" | "failed"> {
+  const [row] = await tx
+    .select({ attempts: lowStockAlerts.attempts })
+    .from(lowStockAlerts)
+    .where(eq(lowStockAlerts.id, alertId));
+  const attempts = row?.attempts ?? 0;
+  const exhausted = (opts.maxRetries ?? 3) >= 0 && attempts >= (opts.maxRetries ?? 3);
+
   await tx
     .update(lowStockAlerts)
     .set({
-      status: "PENDING", // Will be retried
+      status: exhausted ? "FAILED" : "PENDING", // FAILED terminal; PENDING retried
       errorMessage,
       updatedAt: new Date(),
     })
     .where(eq(lowStockAlerts.id, alertId));
+  return exhausted ? "failed" : "requeued";
 }
 
 /**

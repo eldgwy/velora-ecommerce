@@ -5,7 +5,7 @@ import { carts, cartItems } from "@/infrastructure/database/schema/cart";
 import { addresses } from "@/infrastructure/database/schema/customers";
 import {
   findActiveCartId,
-  resolveCatalogEntry,
+  resolveCatalogEntries,
 } from "@/modules/cart/application/cart-context";
 import { ensureCustomerProfile } from "@/services/customer.service";
 import {
@@ -86,8 +86,11 @@ export async function previewCheckout(
     weightGrams: number | null;
   }> = [];
 
+  // T-4.1/GP-10: one batched resolution for the cart snapshot.
+  const entries = await resolveCatalogEntries(rows.map((row) => row.variantId));
+
   for (const row of rows) {
-    const entry = await resolveCatalogEntry(row.variantId);
+    const entry = entries.get(row.variantId);
     if (!entry) {
       blockers.push({ variantId: row.variantId, reason: "unavailable" });
       continue;

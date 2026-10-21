@@ -134,45 +134,13 @@ export async function deleteImage(publicId: string): Promise<boolean> {
 // ============================================
 // Image Validation
 // ============================================
-
-export const ALLOWED_IMAGE_TYPES = [
-  "image/jpeg",
-  "image/jpg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/avif",
-] as const;
-
-export const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
-
-export interface ImageValidationResult {
-  valid: boolean;
-  error?: string;
-}
-
-export function validateImageFile(params: {
-  mimeType: string;
-  size: number;
-  filename?: string;
-}): ImageValidationResult {
-  if (!ALLOWED_IMAGE_TYPES.includes(params.mimeType as (typeof ALLOWED_IMAGE_TYPES)[number])) {
-    return {
-      valid: false,
-      error: `Unsupported file type. Allowed: JPEG, PNG, WebP, GIF, AVIF.`,
-    };
-  }
-
-  if (params.size > MAX_IMAGE_SIZE) {
-    return {
-      valid: false,
-      error: `File too large. Maximum size is ${MAX_IMAGE_SIZE / 1024 / 1024}MB.`,
-    };
-  }
-
-  if (params.size === 0) {
-    return { valid: false, error: "File is empty." };
-  }
-
-  return { valid: true };
-}
+// Canonical definitions live in the shared, browser-safe module so the
+// review form can run the exact same rules client-side (GP-15): the server
+// never sees review uploads (they go browser → provider directly), so the
+// single source of truth must be importable by both bundles.
+export {
+  ALLOWED_IMAGE_TYPES,
+  MAX_IMAGE_SIZE,
+  validateImageFile,
+} from "@/shared/lib/image-validation";
+export type { ImageValidationResult } from "@/shared/lib/image-validation";

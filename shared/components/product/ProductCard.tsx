@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { fromMinorUnits } from "@/modules/checkout/domain/money";
 import { WishlistToggle } from "@/modules/wishlist/presentation/components/WishlistToggle";
+import { formatUsdInDisplayCurrency } from "@/shared/lib/currency-display";
 
 export interface ProductCardProduct {
   id: string;
@@ -22,8 +23,24 @@ export interface ProductCardPromotion {
   promotionName: string | null;
 }
 
-function formatPrice(price: string): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(price));
+/**
+ * Serializable display-currency bundle (T-5.5/D23): the request's display
+ * currency plus the operator's rate table. Server surfaces build it with
+ * `buildDisplayCurrencyProps()` and thread it through client surfaces;
+ * absent/null → plain USD. Display conversion is cosmetic only — the
+ * CHARGED currency is always USD.
+ */
+export interface CardDisplayCurrency {
+  currency: string;
+  rates: Record<string, number>;
+}
+
+function priceFormatter(display?: CardDisplayCurrency | null): (usd: string) => string {
+  if (!display) {
+    return (usd: string) =>
+      new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(usd));
+  }
+  return (usd: string) => formatUsdInDisplayCurrency(usd, display.currency, display.rates);
 }
 
 /**
@@ -35,11 +52,14 @@ export function ProductCard({
   product,
   initialSaved,
   promotion,
+  display,
 }: {
   product: ProductCardProduct;
   initialSaved: boolean;
   promotion?: ProductCardPromotion | null;
+  display?: CardDisplayCurrency | null;
 }) {
+  const fmt = priceFormatter(display);
   const listFrom = product.minVariantPrice ?? product.basePrice;
   // Effective "from" price; struck-through only when actually lower.
   const promoFrom =
@@ -73,9 +93,9 @@ export function ProductCard({
         <div className="mt-3 space-y-1">
           <h3 className="font-medium line-clamp-1 group-hover:text-primary transition-colors">{product.name}</h3>
           <div className="flex items-center gap-2">
-            <span className="text-lg font-semibold">{formatPrice(showPromo ? promoFrom! : listFrom)}</span>
+            <span className="text-lg font-semibold">{fmt(showPromo ? promoFrom! : listFrom)}</span>
             {showPromo ? (
-              <span className="text-sm line-through text-muted-foreground">{formatPrice(listFrom)}</span>
+              <span className="text-sm line-through text-muted-foreground">{fmt(listFrom)}</span>
             ) : null}
             {showPromo ? (
               <span
@@ -86,7 +106,7 @@ export function ProductCard({
               </span>
             ) : null}
             {product.comparePrice && Number(product.comparePrice) > Number(product.basePrice) && (
-              <span className="text-sm line-through text-muted-foreground">{formatPrice(product.comparePrice)}</span>
+              <span className="text-sm line-through text-muted-foreground">{fmt(product.comparePrice)}</span>
             )}
           </div>
           {product.brand && (

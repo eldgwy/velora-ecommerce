@@ -33,11 +33,14 @@ describe("moderation transitions", () => {
     }
   });
 
-  it("rejects every other move", () => {
-    expect(canTransitionReview("approved", "rejected")).toBe(false);
-    expect(canTransitionReview("rejected", "approved")).toBe(false);
-    expect(canTransitionReview("approved", "pending")).toBe(false);
-    expect(canTransitionReview("rejected", "pending")).toBe(false);
+  // T-5.4: moderation is revisable — re-open (back to pending) and direct
+  // flips between moderated states are legal; the latest action wins the
+  // audit columns. Content itself stays immutable (separate rule).
+  it("allows re-moderation: re-open and direct flips", () => {
+    expect(canTransitionReview("approved", "pending")).toBe(true);
+    expect(canTransitionReview("rejected", "pending")).toBe(true);
+    expect(canTransitionReview("approved", "rejected")).toBe(true);
+    expect(canTransitionReview("rejected", "approved")).toBe(true);
   });
 });
 

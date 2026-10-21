@@ -3,21 +3,22 @@ import { ReviewValidationError } from "./review-errors";
 /**
  * Review domain rules (pure, no framework or DB imports).
  *
- * Lifecycle for the moderated queue path: PENDING → APPROVED | REJECTED,
- * with same-state replays allowed. Rejected reviews stay excluded from
- * public display permanently (no resubmission in this scope).
- *
- * Note: the legacy `moderateReview` service permits re-evaluation between
- * non-pending states (covered by its own tests); the admin queue below
- * only ever issues PENDING-sourced transitions, enforced at the command
- * layer.
+ * Lifecycle — T-5.4 (product-approved via the Phase 5 gate): moderation is
+ * REVISABLE. Any non-self status transition is legal, including re-opening
+ * a moderated review back to PENDING (re-moderation) and direct flips
+ * (approved→rejected, rejected→approved). Reviews are customer-authored
+ * records and their CONTENT stays immutable — the admin flow offers
+ * re-moderation, never text/rating editing. The persisted
+ * moderated_by/moderated_at columns record the LATEST moderation action
+ * (write-on-transition semantics, unchanged).
  */
 
 export type ModeratedStatus = "pending" | "approved" | "rejected";
 
-const MODERATION_TRANSITIONS: Array<{ from: ModeratedStatus; to: ModeratedStatus }> = [
-  { from: "pending", to: "approved" },
-  { from: "pending", to: "rejected" },
+const MODERATED_STATUSES: ReadonlyArray<ModeratedStatus> = [
+  "pending",
+  "approved",
+  "rejected",
 ];
 
 /** True when `from → to` is a legal moderation move (replays allowed). */
@@ -26,7 +27,7 @@ export function canTransitionReview(
   to: ModeratedStatus,
 ): boolean {
   if (from === to) return true;
-  return MODERATION_TRANSITIONS.some((r) => r.from === from && r.to === to);
+  return MODERATED_STATUSES.includes(from) && MODERATED_STATUSES.includes(to);
 }
 
 /** Ratings are integers 1–5, no fractions, no strings. */

@@ -20,6 +20,7 @@ import {
   QuestionValidationError,
 } from "@/modules/product-questions/domain/question-errors";
 import { invalidateProductCache } from "@/shared/lib/cache/tags";
+import { consumeRateLimit, UGC_RATE_LIMITS } from "@/shared/lib/rate-limit";
 
 const submitQuestionSchema = z.object({
   productId: z.string().uuid("Invalid product."),
@@ -55,6 +56,15 @@ export async function submitQuestionAction(
   const parsed = submitQuestionSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid question." };
+  }
+  // UGC throttle (GP-15): meter only well-formed submissions.
+  const allowed = await consumeRateLimit(
+    "questions:submit",
+    session.user.id,
+    UGC_RATE_LIMITS.questionSubmit,
+  );
+  if (!allowed) {
+    return { ok: false, error: "You have asked several questions recently. Please try again a bit later." };
   }
   try {
     const result = await submitQuestion({

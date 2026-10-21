@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
 import { cartItems } from "@/infrastructure/database/schema/cart";
@@ -20,7 +20,7 @@ import {
 } from "@/modules/cart/domain/rules/cart-rules";
 import {
   findActiveCartId,
-  resolveCatalogEntry,
+  resolveCatalogEntries,
   type CartOwner,
 } from "@/modules/cart/application/cart-context";
 
@@ -71,8 +71,23 @@ export async function validateCartForCheckout(
     };
   }
 
+  // T-4.1/GP-10: one batched catalog resolution for the whole cart (was
+  // ~5 queries per item), one sample of `now` for all promotion windows.
+  const entries = await resolveCatalogEntries(rows.map((row) => row.variantId));
+  const nowMs = new Date().getTime();
+  const expiredPromotionIds = await findExpiredPromotionProductIds(
+    Array.from(
+      new Set(
+        rows
+          .map((row) => entries.get(row.variantId)?.productId)
+          .filter((id) => id !== undefined),
+      ),
+    ),
+    nowMs,
+  );
+
   for (const row of rows) {
-    const entry = await resolveCatalogEntry(row.variantId);
+    const entry = entries.get(row.variantId);
     const itemWarnings: CartItemWarning[] = [];
 
     if (!entry) {
@@ -142,10 +157,7 @@ export async function validateCartForCheckout(
             : `Only ${entry.availableStock} unit(s) of ${entry.productName} are available.`,
         itemId: row.id,
       });
-    } else if (
-      entry.promotion === null &&
-      (await hasExpiredPromotion(entry.productId))
-    ) {
+    } else if (entry.promotion === null && expiredPromotionIds.has(entry.productId)) {
       // A promotion mapping exists for this product but none is currently
       // active: surface the expired promotion instead of silently dropping
       // the discount from the totals.
@@ -185,7 +197,7 @@ export async function validateCartForCheckout(
   );
   let discountCents = 0;
   for (const item of billable) {
-    const entry = await resolveCatalogEntry(item.variantId);
+    const entry = entries.get(item.variantId);
     if (entry) discountCents += entry.discountPerUnitCents * item.quantity;
   }
   const discountTotal = fromCents(discountCents);
@@ -239,30 +251,45 @@ function missingItem(
   };
 }
 
-/** True when the product has promotion mappings but none currently active. */
-async function hasExpiredPromotion(productId: string): Promise<boolean> {
-  const mappings = await db
-    .select({ promotionId: promotionProducts.promotionId })
+/**
+ * Products among the given ones that have promotion mappings while none of
+ * them is currently live — batched twin of the old per-product
+ * `hasExpiredPromotion` (which fired up to 1 + N-mapping queries per item).
+ * Live rule preserved: isActive && started && not ended; open-ended
+ * (NULL endsAt) stays live. A mapping whose promotion row is missing cannot
+ * be live (the old loop skipped such rows), so a product whose only mapping
+ * is broken counts as expired.
+ */
+async function findExpiredPromotionProductIds(
+  productIds: string[],
+  nowMs: number,
+): Promise<Set<string>> {
+  const expired = new Set<string>();
+  if (productIds.length === 0) return expired;
+  const mappingRows = await db
+    .select({
+      productId: promotionProducts.productId,
+      isActive: promotions.isActive,
+      startsAt: promotions.startsAt,
+      endsAt: promotions.endsAt,
+    })
     .from(promotionProducts)
-    .where(eq(promotionProducts.productId, productId));
-  if (mappings.length === 0) return false;
+    .leftJoin(promotions, eq(promotionProducts.promotionId, promotions.id))
+    .where(inArray(promotionProducts.productId, productIds));
 
-  const now = new Date();
-  for (const mapping of mappings) {
-    const [promo] = await db
-      .select({
-        isActive: promotions.isActive,
-        startsAt: promotions.startsAt,
-        endsAt: promotions.endsAt,
-      })
-      .from(promotions)
-      .where(eq(promotions.id, mapping.promotionId));
-    if (!promo) continue;
-    const live =
-      promo.isActive &&
-      promo.startsAt.getTime() <= now.getTime() &&
-      (promo.endsAt === null || promo.endsAt.getTime() >= now.getTime());
-    if (live) return false;
+  const mapped = new Set<string>();
+  const anyLive = new Set<string>();
+  for (const row of mappingRows) {
+    mapped.add(row.productId);
+    const isLive =
+      row.isActive === true &&
+      row.startsAt !== null &&
+      row.startsAt.getTime() <= nowMs &&
+      (row.endsAt === null || row.endsAt.getTime() >= nowMs);
+    if (isLive) anyLive.add(row.productId);
   }
-  return true;
+  for (const productId of mapped) {
+    if (!anyLive.has(productId)) expired.add(productId);
+  }
+  return expired;
 }

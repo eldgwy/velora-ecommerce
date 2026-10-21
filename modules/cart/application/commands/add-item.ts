@@ -123,10 +123,11 @@ export async function addItemToCart(
       }
 
       if (!existing) {
-        const [{ count }] = await tx
+        const [countRow] = await tx
           .select({ count: sql<number>`count(*)::int` })
           .from(cartItems)
           .where(eq(cartItems.cartId, activeCart.id));
+        const count = countRow?.count ?? 0;
         if (count >= MAX_DISTINCT_ITEMS) {
           throw new InvalidCartItemQuantityError(
             `A cart holds at most ${MAX_DISTINCT_ITEMS} distinct items.`,

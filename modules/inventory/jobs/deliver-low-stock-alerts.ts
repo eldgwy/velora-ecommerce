@@ -4,9 +4,11 @@ import { db } from "@/infrastructure/database";
 import { lowStockAlertStatusEnum } from "@/infrastructure/database/schema/enums";
 import { logger } from "@/shared/lib/logging/logger";
 import {
+  getAlertDeliveredRecipients,
   getNextPendingAlert,
   markAlertDelivered,
   markAlertFailed,
+  recordAlertRecipientDelivered,
   type LowStockAlertEvent,
 } from "@/modules/inventory/application/low-stock-alerts";
 import { sendMail } from "@/shared/lib/mail";
@@ -17,6 +19,8 @@ export interface LowStockAlertDeliveryConfig {
   batchSize: number;
   maxRetries: number;
   retryDelayMs: number;
+  /** Lease expiry reclaim for PROCESSING rows abandoned by a crashed worker (GP-30). */
+  leaseMs: number;
   recipientEmails: string[];
 }
 
@@ -24,6 +28,7 @@ export const DEFAULT_DELIVERY_CONFIG: LowStockAlertDeliveryConfig = {
   batchSize: 50,
   maxRetries: 3,
   retryDelayMs: 60000, // 1 minute
+  leaseMs: 10 * 60 * 1000, // same lease window as GP-17's webhook/notification pattern
   recipientEmails: [],
 };
 
@@ -31,6 +36,12 @@ export interface AlertDeliveryResult {
   alertId: string;
   success: boolean;
   error?: string;
+  /** Recipients whose SMTP send succeeded within THIS job run. */
+  deliveredTo?: string[];
+  /** Recipients still without a ledger entry after this run. */
+  pendingRecipients?: string[];
+  /** True when the alert hit its retry budget and is parked terminal. */
+  exhausted?: boolean;
 }
 
 export interface DeliveryJobResult {
@@ -61,8 +72,8 @@ async function getAlertDetails(
   variantName: string | null;
 }> {
   const rows = await tx.execute(sql`
-    SELECT p.name AS product_name, pv.sku AS variant_sku, pv.name AS variant_name
-    FROM product_variants pv
+    SELECT p.name AS product_name, pv.sku AS variant_sku, pv.description AS variant_name
+    FROM product_variant pv
     JOIN products p ON p.id = pv.product_id
     WHERE pv.id = ${alert.variantId}
   `) as Array<{ product_name: string; variant_sku: string; variant_name: string | null }>;
@@ -176,8 +187,13 @@ function renderLowStockAlertEmail(
 }
 
 /**
- * Send a single low-stock alert email for one alert.
- * Returns the delivery result.
+ * Deliver one alert to all configured recipients with per-recipient
+ * accounting (GP-30): the configured list is deduped, recipients already in
+ * the 0035 ledger are skipped, sends go out one SMTP call at a time, and
+ * every success lands its ledger row immediately — a crash mid-loop can
+ * only UNDER-send, never duplicate. The alert counts as delivered only when
+ * every recipient has a ledger entry; anything else requeues for the
+ * leftover inboxes.
  */
 async function deliverSingleAlert(
   alert: LowStockAlertEvent,
@@ -206,24 +222,57 @@ async function deliverSingleAlert(
     },
   ]);
 
-  try {
-    // Send to all recipients
-    await Promise.all(
-      recipientEmails.map((to) =>
-        sendMail({
-          to,
-          subject: emailContent.subject,
-          html: emailContent.html,
-          text: emailContent.text,
-        }),
-      ),
-    );
+  // Env lists commonly repeat an address; case-insensitive dedupe.
+  const recipients = [
+    ...new Map(recipientEmails.map((e) => [e.toLowerCase(), e] as const)).values(),
+  ];
+  const alreadyDelivered = await db.transaction(async (tx) => {
+    return getAlertDeliveredRecipients(tx, alert.id);
+  });
+  const deliveredKeys = new Set(alreadyDelivered.map((e) => e.toLowerCase()));
+  const missing = recipients.filter((to) => !deliveredKeys.has(to.toLowerCase()));
 
-    return { alertId: alert.id, success: true };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { alertId: alert.id, success: false, error: message };
+  const deliveredTo: string[] = [];
+  const failures: Array<{ to: string; error: string }> = [];
+
+  // Sequential (chunked) sends — a partial success is recorded one inbox at
+  // a time, so requeues reach only the missing recipients.
+  for (const to of missing) {
+    try {
+      await sendMail({
+        to,
+        subject: emailContent.subject,
+        html: emailContent.html,
+        text: emailContent.text,
+      });
+      await db.transaction(async (tx) => {
+        await recordAlertRecipientDelivered(tx, alert.id, to);
+      });
+      deliveredTo.push(to);
+    } catch (error) {
+      failures.push({
+        to,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
+
+  if (failures.length === 0) {
+    return { alertId: alert.id, success: true, deliveredTo };
+  }
+
+  // Every missing recipient either landed or failed; whatever failed stays
+  // pending (no ledger row was written for it).
+  const failedRecipients = failures.map((f) => f.to);
+  return {
+    alertId: alert.id,
+    success: false,
+    deliveredTo,
+    pendingRecipients: failedRecipients,
+    error: `${failures.length} remaining recipient(s) unavailable: ${failures
+      .map((f) => `${f.to} (${f.error})`)
+      .join("; ")}`.slice(0, 500),
+  };
 }
 
 /**
@@ -258,7 +307,10 @@ export async function processLowStockAlerts(
 
   for (let i = 0; i < cfg.batchSize; i++) {
     const alert = await db.transaction(async (tx) => {
-      return getNextPendingAlert(tx);
+      return getNextPendingAlert(tx, {
+        leaseMs: cfg.leaseMs,
+        retryDelayMs: cfg.retryDelayMs,
+      });
     });
 
     if (!alert) {
@@ -271,6 +323,7 @@ export async function processLowStockAlerts(
     // Deliver the alert
     const result = await deliverSingleAlert(alert, cfg.recipientEmails);
 
+    let terminal: "requeued" | "failed" = "requeued";
     if (result.success) {
       succeeded++;
       await db.transaction(async (tx) => {
@@ -283,23 +336,35 @@ export async function processLowStockAlerts(
         variantId: alert.variantId,
         availableStock: alert.availableStock,
         threshold: alert.threshold,
+        deliveredTo: result.deliveredTo,
+        recycledLease: alert.attempts > 1,
       });
     } else {
       failed++;
-      await db.transaction(async (tx) => {
-        await markAlertFailed(tx, alert.id, result.error ?? "Unknown error");
+      terminal = await db.transaction(async (tx) => {
+        return markAlertFailed(tx, alert.id, result.error ?? "Unknown error", {
+          maxRetries: cfg.maxRetries,
+        });
       });
-      logger.error("Low stock alert delivery failed", {
-        module: "inventory",
-        action: "lowStockAlertDeliveryFailed",
-        alertId: alert.id,
-        variantId: alert.variantId,
-        error: result.error,
-        attempts: alert.attempts,
-      });
+      logger[terminal === "failed" ? "error" : "warn"](
+        terminal === "failed"
+          ? "Low stock alert retry budget exhausted — parked as FAILED"
+          : "Low stock alert delivery failed — scheduled retry",
+        {
+          module: "inventory",
+          action: terminal === "failed"
+            ? "lowStockAlertRetriesExhausted"
+            : "lowStockAlertDeliveryFailed",
+          alertId: alert.id,
+          variantId: alert.variantId,
+          error: result.error,
+          attempts: alert.attempts,
+          pendingRecipients: result.pendingRecipients,
+        },
+      );
     }
 
-    results.push(result);
+    results.push({ ...result, exhausted: terminal === "failed" });
   }
 
   const durationMs = Date.now() - startTime;

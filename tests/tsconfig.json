@@ -1,0 +1,11 @@
+{
+  // Test fixtures legitimately reach for `arr[0]` on freshly established
+  // rows; forcing the same `noUncheckedIndexedAccess` strictness across
+  // ~550 fixture accesses would balloon diffs without product-safety gain.
+  // The flag is enforced everywhere in production code via the root
+  // tsconfig; only this directory opts out.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": false
+  }
+}

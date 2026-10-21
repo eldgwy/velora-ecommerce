@@ -83,7 +83,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({ name: "RF Product", status: "ACTIVE", basePrice: "40.00", categoryId: cat.id, brandId: br.id })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "RF Product", status: "ACTIVE", basePrice: "40.00", categoryId: cat.id, brandId: br.id })
     .returning();
   productId = prod.id;
   const [v] = await testDb
@@ -169,7 +169,10 @@ describe("refund workflow", () => {
       Record<string, unknown>,
       { idempotencyKey: string },
     ];
-    expect(opts.idempotencyKey).toBe(`refund-${paymentId}-4000`);
+    // Key is derived from the refund row id (unique per logical refund),
+    // stable across retries of the same reservation, never across two
+    // different equal-amount refunds (GP-12).
+    expect(opts.idempotencyKey).toBe(`refund-${paymentId}-${res.refundId}`);
 
     const [order] = await testDb.select().from(orders).where(eq(orders.id, orderId));
     expect(order!.paymentStatus).toBe("REFUNDED");
@@ -252,10 +255,11 @@ describe("partial refunds and duplicates", () => {
     }
   });
 
-  it("converges an admin retry of the same amount onto the original refund", async () => {
-    // Same (payment, amount) after success: Stripe replays the identical
-    // refund object by idempotency key; locally we must converge, not
-    // double-count. Uses a fresh payment to isolate amounts.
+  it("runs a NEW gateway operation for a repeat equal-amount refund (GP-12)", async () => {
+    // A second equal-amount refund after a COMPLETED one is a separate
+    // logical refund: per-row idempotency keys mean it gets its own Stripe
+    // operation instead of replaying the first refund object. Untagged
+    // amount-only staging is the admin's explicit new request.
     const [orderR] = await testDb
       .insert(orders)
       .values({
@@ -290,25 +294,33 @@ describe("partial refunds and duplicates", () => {
         reason: "first",
         actorId: "admin-1",
       });
-      expect(first.supersededBy).toBeUndefined();
+      expect(first.status).toBe("COMPLETED");
 
       refundsCreateMock.mockClear();
-      const retry = await requestRefund({
+      const second = await requestRefund({
         orderId: orderR.id,
         amountCents: 1000,
-        reason: "admin retried the same refund",
+        reason: "second independent refund",
         actorId: "admin-1",
       });
-      // Converged: same provider refund, single COMPLETED counting.
-      expect(retry.supersededBy).toBe(first.refundId);
-      expect(retry.providerRefundId).toBe(first.providerRefundId);
+      // Distinct local rows, distinct provider refunds, distinct keys.
+      expect(second.refundId).not.toBe(first.refundId);
+      expect(second.supersededBy).toBeUndefined();
+      expect(second.providerRefundId).not.toBe(first.providerRefundId);
+      expect(refundsCreateMock).toHaveBeenCalledTimes(1); // one NEW money movement
+      const keys = refundsCreateMock.mock.calls.map(
+        ([, o]) => (o as { idempotencyKey: string }).idempotencyKey,
+      );
+      expect(keys.every((k) => k === `refund-${payR.id}-${second.refundId}`)).toBe(true);
+
       const rows = await testDb
         .select()
         .from(refunds)
         .where(and(eq(refunds.paymentId, payR.id), eq(refunds.status, "COMPLETED")));
       const total = rows.reduce((s, r) => s + Math.round(Number(r.amount) * 100), 0);
-      expect(total).toBe(1000);
-      expect(refundsCreateMock).toHaveBeenCalledTimes(1); // Stripe replay, one money movement
+      expect(total).toBe(2000);
+      const [order] = await testDb.select().from(orders).where(eq(orders.id, orderR.id));
+      expect(order!.paymentStatus).toBe("PARTIALLY_REFUNDED");
     } finally {
       await testDb.delete(refunds).where(eq(refunds.paymentId, payR.id));
       await testDb.delete(payments).where(eq(payments.id, payR.id));
@@ -356,9 +368,15 @@ describe("partial refunds and duplicates", () => {
       expect(failed).toBeDefined();
       const [order] = await testDb.select().from(orders).where(eq(orders.id, order3.id));
       expect(order!.paymentStatus).toBe("PAID");
-      // A fresh attempt after failure stages anew (FAILED rows never block).
+      // A fresh attempt after failure stages anew (FAILED rows never block)
+      // and must generate a NEW idempotency key so the provider's cached
+      // error for the failed attempt cannot poison the retry (GP-12).
+      const keyBefore = ((refundsCreateMock.mock.calls[0]?.[1] ?? {}) as { idempotencyKey?: string }).idempotencyKey;
       const retry = await requestRefund({ orderId: order3.id, amountCents: 1000, reason: "retry", actorId: "a" });
       expect(retry.status).toBe("COMPLETED");
+      const keyAfter = ((refundsCreateMock.mock.calls[1]?.[1] ?? {}) as { idempotencyKey?: string }).idempotencyKey;
+      expect(keyAfter).not.toBe(keyBefore);
+      expect(keyAfter).toBe(`refund-${pay3.id}-${retry.refundId}`);
     } finally {
       await testDb.delete(refunds).where(eq(refunds.paymentId, pay3.id));
       await testDb.delete(payments).where(eq(payments.id, pay3.id));

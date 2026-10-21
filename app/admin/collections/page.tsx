@@ -1,3 +1,5 @@
+import { EmptyState } from "@/shared/components/ui/empty-state";
+
 import Link from "next/link";
 
 import { Button } from "@/shared/components/ui/button";
@@ -75,9 +77,7 @@ export default async function CollectionsPage({ searchParams }: CollectionsPageP
       </form>
 
       {items.length === 0 ? (
-        <div className="rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
-          <p className="text-sm text-muted-foreground">No collections match. Create one to begin.</p>
-        </div>
+        <EmptyState title="No collections match" description="Create one to begin." />
       ) : (
         <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-foreground/10">
           <table className="w-full text-left text-sm">

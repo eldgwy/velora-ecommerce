@@ -59,7 +59,7 @@ beforeAll(async () => {
   for (let i = 0; i < 3; i += 1) {
     const [p] = await testDb
       .insert(products)
-      .values({ name: `MC Product ${i}`, status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
+      .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: `MC Product ${i}`, status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
       .returning();
     productIds.push(p.id);
   }
@@ -242,7 +242,12 @@ describe("public storefront queries", () => {
     const cards = await getCollectionCards(detail!.products.map((p) => p.productId));
     expect(cards.map((c) => c.id)).toEqual([productIds[0], productIds[1]]);
     expect(cards[0]!.name).toBe("MC Product 0");
-    expect(cards[0]!.slug).toBe(productIds[0]);
+    // Card slug is the product's own URL identifier (no longer the id).
+    const [cardProduct] = await testDb
+      .select({ slug: products.slug })
+      .from(products)
+      .where(eq(products.id, productIds[0]!));
+    expect(cards[0]!.slug).toBe(cardProduct!.slug);
     expect(cards[0]!.basePrice).toBe("20.00");
 
     // Archiving a product drops it from public results.

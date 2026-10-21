@@ -7,6 +7,7 @@ import { HISTORY_LIMIT } from "@/modules/recently-viewed/domain/history-rules";
 
 export interface RecentViewItem {
   productId: string;
+  slug: string;
   productName: string;
   basePrice: string;
   comparePrice: string | null;
@@ -36,6 +37,7 @@ export async function getRecentHistory(
   const rows = await db
     .select({
       productId: products.id,
+      slug: products.slug,
       productName: products.name,
       basePrice: products.basePrice,
       comparePrice: products.comparePrice,
@@ -76,6 +78,7 @@ export async function resolveGuestHistory(
   const rows = await db
     .select({
       productId: products.id,
+      slug: products.slug,
       productName: products.name,
       basePrice: products.basePrice,
       comparePrice: products.comparePrice,

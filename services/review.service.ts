@@ -33,6 +33,8 @@ export async function getReviewById(
   productId: string;
   rating: number | null;
   status: ReviewStatus | null;
+  moderatedBy: string | null;
+  moderatedAt: Date | null;
 } | null> {
   const [row] = await db
     .select({
@@ -40,6 +42,8 @@ export async function getReviewById(
       productId: reviews.productId,
       rating: reviews.rating,
       status: reviews.status,
+      moderatedBy: reviews.moderatedBy,
+      moderatedAt: reviews.moderatedAt,
     })
     .from(reviews)
     .where(eq(reviews.id, reviewId));
@@ -97,7 +101,14 @@ export async function moderateReview(
 
     const [updated] = await tx
       .update(reviews)
-      .set({ status, updatedAt: new Date() })
+      .set({
+        status,
+        updatedAt: new Date(),
+        // Audited moderation (migration 0032): the acting admin/staff id and
+        // the moderation moment, written only on an actual transition.
+        moderatedBy: actorId,
+        moderatedAt: new Date(),
+      })
       .where(and(eq(reviews.id, reviewId), ne(reviews.status, status)))
       .returning({
         id: reviews.id,

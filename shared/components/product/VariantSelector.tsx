@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { formatPrice } from "@/shared/lib/utils";
+import { AddToCartButton } from "@/shared/components/product/AddToCartButton";
 
 interface ProductVariant {
   id: string;
@@ -100,7 +101,29 @@ export function VariantSelector({ product, promotionViews }: VariantSelectorProp
     setSelectedValues((prev) => ({ ...prev, [optionId]: valueId }));
   };
 
-  if (product.options.length === 0) return null;
+  if (product.options.length === 0) {
+    // Simple product (no options): resolve the default purchasable variant
+    // the same way wishlist move-to-cart does — first ACTIVE variant.
+    const defaultVariant =
+      product.variants.find((v) => v.status === "ACTIVE") ?? null;
+    const simpleInStock = (defaultVariant?.availableStock ?? 0) > 0;
+
+    return (
+      <div className="mt-2 space-y-3">
+        {defaultVariant && defaultVariant.sku && (
+          <p className="text-sm text-muted-foreground font-mono">
+            SKU: {defaultVariant.sku}
+          </p>
+        )}
+        <AddToCartButton
+          variantId={defaultVariant?.id ?? null}
+          disabled={!simpleInStock}
+          disabledLabel={defaultVariant ? "Out of Stock" : "Unavailable"}
+          className="w-full"
+        />
+      </div>
+    );
+  }
 
   return (
     <fieldset className="space-y-4">
@@ -202,6 +225,20 @@ export function VariantSelector({ product, promotionViews }: VariantSelectorProp
           )}
         </div>
       )}
+
+      {/* Purchase action */}
+      <div className="pt-2">
+        <AddToCartButton
+          variantId={resolvedVariant?.id ?? null}
+          disabled={!isCompleteSelection || !isInStock}
+          disabledLabel={
+            !isCompleteSelection
+              ? "Select Options"
+              : "Out of Stock"
+          }
+          className="w-full"
+        />
+      </div>
     </fieldset>
   );
 }

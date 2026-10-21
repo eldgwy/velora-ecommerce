@@ -18,7 +18,7 @@ import {
 import {
   isUniqueViolation,
   lockCartItems,
-  resolveCatalogEntry,
+  resolveCatalogEntries,
   type CartItemRow,
 } from "@/modules/cart/application/cart-context";
 
@@ -140,9 +140,13 @@ export async function mergeGuestCartIntoUserCart(
     );
     let userDistinctCount = userItems.length;
 
+    // T-4.1/GP-10: one batched resolution for all guest items (still reads
+    // through the global pool, matching what the old per-item resolver did).
+    const entries = await resolveCatalogEntries(guestItems.map((g) => g.variantId));
+
     // 4. Move each guest item with full validation.
     for (const guestItem of guestItems) {
-      const entry = await resolveCatalogEntry(guestItem.variantId);
+      const entry = entries.get(guestItem.variantId);
 
       if (!entry) {
         invalidVariants.push(guestItem.variantId);

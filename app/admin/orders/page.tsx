@@ -1,3 +1,5 @@
+import { EmptyState } from "@/shared/components/ui/empty-state";
+
 import Link from "next/link";
 
 import { Button } from "@/shared/components/ui/button";
@@ -155,9 +157,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
       </form>
 
       {items.length === 0 ? (
-        <div className="rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
-          <p className="text-sm text-muted-foreground">No orders match this filter.</p>
-        </div>
+        <EmptyState title="No orders match this filter" />
       ) : (
         <OrderBatchControls orders={items} />
       )}

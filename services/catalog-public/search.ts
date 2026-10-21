@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@/infrastructure/database";
 import {
   categories,
@@ -12,6 +12,7 @@ import { reviews } from "@/infrastructure/database/schema/reviews";
 import { reviewStatusEnum } from "@/infrastructure/database/schema/enums";
 import { unstable_cache } from "next/cache";
 import { cacheTags } from "@/shared/lib/cache/tag-names";
+import { escapeILike } from "@/shared/lib/like-patterns";
 import {
   getEffectiveVisibleCategoryIds,
   resolveCategorySlug,
@@ -142,14 +143,12 @@ function validateSearchInput(input: SearchFilters): SearchFilters {
 // Search Query Building
 // ============================================
 
-function escapeILike(value: string): string {
-  return value
-    .replace(/[%_\\]/g, (match) => `\\${match}`)
-    .replace(/%/g, "\\%")
-    .replace(/_/g, "\\_");
-}
 
-async function buildSearchConditions(filters: SearchFilters, visibleCategoryIds: string[]) {
+
+async function buildSearchConditions(
+  filters: SearchFilters,
+  visibleCategoryIds: string[],
+) {
   const conditions = [
     eq(products.status, "ACTIVE"),
     inArray(products.categoryId, visibleCategoryIds),
@@ -207,6 +206,47 @@ function getVariantPriceSubquery() {
         AND pv.is_active = 'ACTIVE'
     )
   `;
+}
+
+/**
+ * Effective per-product price (min active-variant price, falling back to
+ * the base price when a product has no listed variant). One SQL fragment
+ * shared by the listing ORDER BY, the price filters, and the facets so the
+ * three surfaces can never drift apart.
+ */
+function getEffectivePriceExpr() {
+  return sql`COALESCE(${getVariantPriceSubquery()}, ${products.basePrice})`;
+}
+
+function getPriceRangeConditions(
+  minPrice: number | undefined,
+  maxPrice: number | undefined,
+) {
+  const conditions: SQL[] = [];
+  const priceExpr = getEffectivePriceExpr();
+  if (minPrice !== undefined) {
+    conditions.push(sql`${priceExpr} >= ${minPrice}`);
+  }
+  if (maxPrice !== undefined) {
+    conditions.push(sql`${priceExpr} <= ${maxPrice}`);
+  }
+  return conditions;
+}
+
+function getInStockCondition() {
+  return sql`
+    EXISTS (
+      SELECT 1 FROM ${productVariants} pv
+      INNER JOIN ${inventory} inv ON inv.variant_id = pv.id
+      WHERE pv.product_id = products.id
+        AND pv.is_active = 'ACTIVE'
+        AND (inv.quantity - inv.reserved_quantity) > 0
+    )
+  `;
+}
+
+function getRatingCondition(rating: number) {
+  return sql`${getAvgRatingSubquery()} >= ${rating}`;
 }
 
 function getOrderByClause(sort: SearchFilters["sort"]) {
@@ -276,38 +316,23 @@ export const searchProducts = unstable_cache(
     }
 
     // Add price filters (against minimum active variant price)
-    if (filters.minPrice !== undefined || filters.maxPrice !== undefined) {
-      const variantPriceSubquery = getVariantPriceSubquery();
-      if (filters.minPrice !== undefined) {
-        conditions.push(sql`COALESCE(${variantPriceSubquery}, ${products.basePrice}) >= ${filters.minPrice}`);
-      }
-      if (filters.maxPrice !== undefined) {
-        conditions.push(sql`COALESCE(${variantPriceSubquery}, ${products.basePrice}) <= ${filters.maxPrice}`);
-      }
-    }
+    conditions.push(...getPriceRangeConditions(filters.minPrice, filters.maxPrice));
 
     // Add inStock filter
     if (filters.inStockOnly) {
-      conditions.push(sql`
-        EXISTS (
-          SELECT 1 FROM ${productVariants} pv
-          INNER JOIN ${inventory} inv ON inv.variant_id = pv.id
-          WHERE pv.product_id = products.id
-            AND pv.is_active = 'ACTIVE'
-            AND (inv.quantity - inv.reserved_quantity) > 0
-        )
-      `);
+      conditions.push(getInStockCondition());
     }
 
     // Add rating filter
     if (filters.rating !== undefined) {
-      conditions.push(sql`${getAvgRatingSubquery()} >= ${filters.rating}`);
+      conditions.push(getRatingCondition(filters.rating));
     }
 
     // Fetch items
     const productRows = await db
       .select({
         id: products.id,
+        slug: products.slug,
         name: products.name,
         basePrice: products.basePrice,
         comparePrice: products.comparePrice,
@@ -357,7 +382,7 @@ export const searchProducts = unstable_cache(
     const results: ProductSearchResult[] = items.map((p) => ({
       id: p.id,
       name: p.name,
-      slug: p.id, // Using ID as slug until products have slug column
+      slug: p.slug,
       basePrice: p.basePrice,
       comparePrice: p.comparePrice,
       primaryImage: imageMap.get(p.id)
@@ -381,10 +406,11 @@ export const searchProducts = unstable_cache(
     }));
 
     // Get total count
-    const [{ count: totalCount }] = await db
+    const [countRow] = await db
       .select({ count: sql<number>`count(*)` })
       .from(products)
       .where(and(...conditions));
+    const totalCount = countRow?.count ?? 0;
 
     return {
       items: results,
@@ -395,6 +421,148 @@ export const searchProducts = unstable_cache(
     };
   },
   ["products-search"],
+  { tags: [cacheTags.productsListing], revalidate: 60 }
+);
+
+// ============================================
+// Search Facets (T-5.3)
+// ============================================
+
+export interface SearchFacets {
+  /** brand id → matching product count under every filter EXCEPT brand. */
+  brandCounts: Record<string, number>;
+  /** category id → matching product count under every filter EXCEPT category. */
+  categoryCounts: Record<string, number>;
+  /** Count per rating band (floor of the approved-review average), 1–5. */
+  ratingBands: Array<{ rating: number; count: number }>;
+  /** Min/max effective price under the query + selectors only. */
+  priceBounds: { min: string | null; max: string | null };
+  /** In-stock matches under every filter EXCEPT the in-stock checkbox. */
+  inStockCount: number;
+  /** Matches under every applied filter — consistent with searchProducts. */
+  totalCount: number;
+}
+
+const emptyFacets: SearchFacets = {
+  brandCounts: {},
+  categoryCounts: {},
+  ratingBands: [],
+  priceBounds: { min: null, max: null },
+  inStockCount: 0,
+  totalCount: 0,
+};
+
+/**
+ * Facet counts for the /search sidebar (T-5.3). Standard faceted-search
+ * semantics: each dimension's counts are computed under all OTHER applied
+ * filters minus that dimension's own selection, so a facet never zeroes
+ * itself out. rating bands + price bounds + in-stock are computed under
+ * the query + category + brand selectors only. Same visibility rules,
+ * effective-price expression and rating subquery as searchProducts — one
+ * shared source of truth. Cached under the productsListing tag so any
+ * product/brand/category/review mutation invalidates facets with the
+ * listing.
+ */
+async function getSearchFacetsImpl(
+  rawFilters: SearchFilters = {},
+): Promise<SearchFacets> {
+  const filters = validateSearchInput(rawFilters);
+  const visibleCategoryIds = await getEffectiveVisibleCategoryIds();
+  if (visibleCategoryIds.length === 0) {
+    return emptyFacets;
+  }
+
+  // Query + brand + category selector set (base for the numeric/boolean
+  // facets and the band computation).
+  const base = await buildSearchConditions(filters, visibleCategoryIds);
+  if (!base.conditions) {
+    return emptyFacets;
+  }
+
+  // Facet sets: each dimension's own selection is REMOVED from its filter
+  // copy, while every other filter still applies, so a facet never zeroes
+  // itself out.
+  const [brandBase, categoryBase] = await Promise.all([
+    buildSearchConditions({ ...filters, brandSlug: undefined }, visibleCategoryIds),
+    buildSearchConditions({ ...filters, categorySlug: undefined }, visibleCategoryIds),
+  ]);
+  const dynamicConditions = [
+    ...getPriceRangeConditions(filters.minPrice, filters.maxPrice),
+    ...(filters.inStockOnly ? [getInStockCondition()] : []),
+    ...(filters.rating !== undefined ? [getRatingCondition(filters.rating)] : []),
+  ];
+  if (!brandBase.conditions || !categoryBase.conditions) {
+    return emptyFacets;
+  }
+  const brandSet = [...brandBase.conditions, ...dynamicConditions];
+  const categorySet = [...categoryBase.conditions, ...dynamicConditions];
+  // totalCount must be consistent with searchProducts for the same input:
+  // every applied filter (including each dimension's selection).
+  const allSet = [...base.conditions, ...dynamicConditions];
+
+  const priceExpr = getEffectivePriceExpr();
+
+  const [brandCountRows, categoryCountRows, ratingRows, miscRow, totalRow] = await Promise.all([
+    db
+      .select({ brandId: products.brandId, count: sql<number>`count(*)` })
+      .from(products)
+      .where(and(...brandSet, sql`${products.brandId} IS NOT NULL`))
+      .groupBy(products.brandId),
+    db
+      .select({ categoryId: products.categoryId, count: sql<number>`count(*)` })
+      .from(products)
+      .where(and(...categorySet, sql`${products.categoryId} IS NOT NULL`))
+      .groupBy(products.categoryId),
+    // The rating subquery is correlated per product, so its band must be
+    // computed in a derived table before grouping (GROUP BY may not contain
+    // the correlated subquery itself).
+    db.execute(sql`
+      SELECT band AS rating, (count(*))::int AS count
+      FROM (
+        SELECT floor(${getAvgRatingSubquery()})::int AS band
+        FROM ${products}
+        WHERE ${and(...base.conditions)}
+      ) AS rated
+      WHERE band IS NOT NULL
+      GROUP BY band
+      ORDER BY band
+    `),
+    db
+      .select({
+        inStockCount: sql<number>`count(*) FILTER (WHERE ${getInStockCondition()})`,
+        minPrice: sql<string | null>`min(${priceExpr})`,
+        maxPrice: sql<string | null>`max(${priceExpr})`,
+      })
+      .from(products)
+      .where(and(...base.conditions)),
+    db
+      .select({ totalCount: sql<number>`count(*)` })
+      .from(products)
+      .where(and(...allSet)),
+  ]);
+
+  const brandCounts: Record<string, number> = {};
+  for (const row of brandCountRows) {
+    if (row.brandId) brandCounts[row.brandId] = Number(row.count ?? 0);
+  }
+  const categoryCounts: Record<string, number> = {};
+  for (const row of categoryCountRows) {
+    if (row.categoryId) categoryCounts[row.categoryId] = Number(row.count ?? 0);
+  }
+
+  return {
+    brandCounts,
+    categoryCounts,
+    ratingBands: ratingRows.map((r) => ({ rating: Number(r.rating), count: Number(r.count ?? 0) })),
+    priceBounds: { min: miscRow[0]?.minPrice ?? null, max: miscRow[0]?.maxPrice ?? null },
+    inStockCount: Number(miscRow[0]?.inStockCount ?? 0),
+    totalCount: Number(totalRow[0]?.totalCount ?? 0),
+  };
+}
+
+export const getSearchFacets = unstable_cache(
+  getSearchFacetsImpl,
+  ["products-search-facets"],
   { tags: [cacheTags.productsListing], revalidate: 60 }
 );
 
@@ -424,7 +592,7 @@ export const getSearchSuggestions = unstable_cache(
 
     // Product suggestions
     const productResults = await db
-      .select({ id: products.id, name: products.name })
+      .select({ id: products.id, slug: products.slug, name: products.name })
       .from(products)
       .where(
         and(
@@ -439,7 +607,7 @@ export const getSearchSuggestions = unstable_cache(
       type: "product" as const,
       id: p.id,
       name: p.name,
-      slug: p.id,
+      slug: p.slug,
     })));
 
     // Category suggestions

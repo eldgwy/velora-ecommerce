@@ -49,8 +49,9 @@ export async function createImage(
     .insert(productImages)
     .values(data)
     .returning();
+  if (!created) throw new Error("Image insert returned no row");
   logger.catalog.imageCreated(created.id, data.productId, created.isPrimary, userId ?? "unknown", requestId);
-  return created!;
+  return created;
 }
 
 export async function updateImage(

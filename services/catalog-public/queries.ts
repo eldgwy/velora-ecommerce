@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql, desc } from "drizzle-orm";
+import { and, eq, inArray, sql, desc, or } from "drizzle-orm";
 import { db } from "@/infrastructure/database";
 import {
   categories,
@@ -395,6 +395,7 @@ export const listProducts = unstable_cache(
     const productRows = await db
       .select({
         id: products.id,
+        slug: products.slug,
         name: products.name,
         basePrice: products.basePrice,
         comparePrice: products.comparePrice,
@@ -455,7 +456,7 @@ export const listProducts = unstable_cache(
     const listingItems: ProductListingItem[] = items.map((p) => ({
       id: p.id,
       name: p.name,
-      slug: p.id, // Use ID as slug since products don't have slug column yet
+      slug: p.slug,
       basePrice: p.basePrice,
       comparePrice: p.comparePrice,
       primaryImage: imageMap.get(p.id)
@@ -477,10 +478,11 @@ export const listProducts = unstable_cache(
     }));
 
     // Get total count for pagination
-    const [{ count: totalCount }] = await db
+    const [countRow] = await db
       .select({ count: sql<number>`count(*)` })
       .from(products)
       .where(and(...conditions));
+    const totalCount = countRow?.count ?? 0;
 
     return {
       items: listingItems,
@@ -497,14 +499,28 @@ export const listProducts = unstable_cache(
 /**
  * Get product detail by slug (storefront).
  * Returns full product with variants, options, images.
- * Note: Currently uses product ID as slug since products table doesn't have slug column yet.
+ * Compatibility contract: legacy product-UUID URLs (pre-slug era) keep
+ * resolving — the lookup matches the slug column OR the id column. Slugs
+ * are unique in the database (products_slug_unique_idx), so a UUID match
+ * can never be ambiguous.
  */
 export const getProductBySlug = unstable_cache(
-  async (id: string): Promise<PublicProduct | null> => {
+  async (slugOrId: string): Promise<PublicProduct | null> => {
+    // A slug never needs the id branch: binding a non-uuid string to the
+    // uuid column would throw (22P02), and id lookups are reserved for the
+    // documented legacy URL compatibility contract.
+    const isLegacyId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
     const [product] = await db
       .select()
       .from(products)
-      .where(and(eq(products.id, id), eq(products.status, "ACTIVE")));
+      .where(
+        and(
+          isLegacyId
+            ? or(eq(products.slug, slugOrId), eq(products.id, slugOrId))
+            : eq(products.slug, slugOrId),
+          eq(products.status, "ACTIVE"),
+        ),
+      );
 
     if (!product) return null;
 
@@ -524,7 +540,7 @@ export const getProductBySlug = unstable_cache(
       id: product.id,
       name: product.name,
       description: product.description,
-      slug: product.id, // Use ID as slug
+      slug: product.slug,
       basePrice: product.basePrice,
       comparePrice: product.comparePrice,
       status: product.status,
@@ -565,7 +581,7 @@ export const getProductById = unstable_cache(
       id: product.id,
       name: product.name,
       description: product.description,
-      slug: product.id, // Use ID as slug
+      slug: product.slug,
       basePrice: product.basePrice,
       comparePrice: product.comparePrice,
       status: product.status,
@@ -740,7 +756,11 @@ function getProductOrderBy(sort?: ProductListingFilters["sort"]) {
         WHERE pv.product_id = products.id AND pv.is_active = 'ACTIVE'
       ), products.base_price) DESC`;
     case "newest":
-      return products.createdAt;
+      // Newest first WITH the same deterministic tie-break the search surface
+      // uses (products with equal createdAt must not paginate unstably). The
+      // pre-fix code returned the bare ASC column, so "Newest"/"New Arrivals"
+      // showed oldest-first.
+      return sql`${products.createdAt} DESC, ${products.id} ASC`;
     case "rating":
       return sql`(
         SELECT AVG(r.rating)::numeric(3,2)

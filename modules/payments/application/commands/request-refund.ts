@@ -287,7 +287,13 @@ export async function requestRefund(request: RefundRequest): Promise<RefundResul
         reason: "requested_by_customer",
         metadata: { orderId: request.orderId, paymentId: staged.payment.paymentId },
       },
-      { idempotencyKey: `refund-${staged.payment.paymentId}-${staged.amountCents}` },
+      // Key is derived from the refund row, not the amount: retries of the
+      // same reservation (fresh twin adoption / post-ambiguous retry) reuse
+      // the staged row's id and therefore replay the same Stripe operation,
+      // while a new logical attempt after FAILED or a previous COMPLETED
+      // refund gets its own row and its own gateway operation — the equal
+      // amount can no longer replay an existing refund.
+      { idempotencyKey: `refund-${staged.payment.paymentId}-${staged.refundId}` },
     );
   } catch (error) {
     if (isAmbiguousGatewayError(error)) {

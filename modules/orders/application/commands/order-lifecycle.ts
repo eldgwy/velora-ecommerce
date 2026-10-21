@@ -117,6 +117,7 @@ export async function cancelOrder(
     try {
       await releaseOrderReservation(orderId, {
         actorId: options.actorId,
+        actorType: options.actorType,
         requestId: options.requestId,
         reason: options.reason ?? "Order cancelled",
       });
@@ -221,6 +222,7 @@ export async function handlePaymentFailure(
     try {
       await releaseOrderReservation(orderId, {
         actorId: options.actorId,
+        actorType: options.actorType,
         requestId: options.requestId,
         reason: options.reason ?? "Payment failed",
       });
@@ -310,6 +312,7 @@ export async function handleCheckoutExpiration(
     try {
       await releaseOrderReservation(orderId, {
         actorId: options.actorId,
+        actorType: options.actorType,
         requestId: options.requestId,
         reason: options.reason ?? "Checkout expired",
       });

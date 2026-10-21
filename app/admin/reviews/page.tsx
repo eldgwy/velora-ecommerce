@@ -43,7 +43,8 @@ export default async function ReviewsPage({ searchParams }: ReviewsPageProps) {
       <div>
         <h1 className="text-2xl font-semibold">Review moderation</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {totalCount} {status} review{totalCount === 1 ? "" : "s"} · only pending reviews can be moderated
+          {totalCount} {status} review{totalCount === 1 ? "" : "s"} · pending reviews need a
+          decision; moderated reviews can be re-moderated
         </p>
       </div>
 

@@ -57,6 +57,13 @@ export default async function CustomerOrderDetailsPage({ params }: OrderDetailsP
         {order.checkoutExpiresAt && order.status === "PENDING"
           ? ` · pay by ${formatDate(order.checkoutExpiresAt)}`
           : ""}
+        {" · "}
+        <a
+          href={`/account/orders/${order.id}/invoice`}
+          className="underline underline-offset-4 hover:text-foreground"
+        >
+          Download invoice (PDF)
+        </a>
       </p>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">

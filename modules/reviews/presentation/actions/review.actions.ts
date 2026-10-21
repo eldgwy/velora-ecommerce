@@ -16,6 +16,7 @@ import {
 } from "@/modules/reviews/domain/review-errors";
 import { createSignedUploadParams } from "@/infrastructure/cloudinary/client";
 import { invalidateReviewCache } from "@/shared/lib/cache/tags";
+import { consumeRateLimit, UGC_RATE_LIMITS } from "@/shared/lib/rate-limit";
 
 const reviewImageSchema = z.object({
   url: z.string().url("Image URL is invalid.").max(2048),
@@ -43,6 +44,19 @@ export async function submitReviewAction(
   const parsed = submitReviewSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid review details." };
+  }
+  // UGC throttle (GP-15): meter only well-formed submissions, so malformed
+  // spam payloads don't run down a customer's quota but real abuse does.
+  const allowed = await consumeRateLimit(
+    "reviews:submit",
+    session.user.id,
+    UGC_RATE_LIMITS.reviewSubmit,
+  );
+  if (!allowed) {
+    return {
+      ok: false,
+      error: "You have submitted several reviews recently. Please try again a bit later.",
+    };
   }
   try {
     const result = await submitReview({
@@ -79,6 +93,16 @@ export async function getReviewImageUploadParamsAction(): Promise<
 > {
   const session = await getCurrentSession();
   if (!session) return { ok: false, error: "You must be signed in to upload images." };
+  // Metered (GP-15): signed upload params were previously unmetered; each
+  // call mints a valid provider credential for the caller's own folder.
+  const allowed = await consumeRateLimit(
+    "reviews:upload-params",
+    session.user.id,
+    UGC_RATE_LIMITS.reviewUploadParams,
+  );
+  if (!allowed) {
+    return { ok: false, error: "Too many upload attempts recently. Please try again later." };
+  }
   const params = createSignedUploadParams({
     folder: `velora/reviews/${session.user.id}`,
     tags: [session.user.id],

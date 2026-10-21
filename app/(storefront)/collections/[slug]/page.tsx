@@ -1,10 +1,12 @@
 import { Metadata } from "next";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 
 import { getCurrentSession } from "@/shared/lib/guards";
 import { getSavedProductIds } from "@/modules/wishlist/application/queries/wishlist";
 import { getProductPromotionSummaries } from "@/modules/promotions/application/queries/promotion-pricing";
 import { ProductCard } from "@/shared/components/product/ProductCard";
+import { buildDisplayCurrencyProps } from "@/shared/lib/currency-display-server";
 import {
   getCollectionCards,
   getPublicCollectionBySlug,
@@ -23,11 +25,13 @@ export async function generateMetadata({ params }: CollectionPageProps): Promise
   return {
     title: collection.name,
     description: collection.description ?? undefined,
+    alternates: { canonical: `/collections/${slug}` },
   };
 }
 
 export default async function CollectionDetailPage({ params }: CollectionPageProps) {
   const { slug } = await params;
+  const display = await buildDisplayCurrencyProps();
   const collection = await getPublicCollectionBySlug(slug);
   if (!collection) notFound();
 
@@ -47,12 +51,14 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
     <div className="container mx-auto px-4 py-8">
       {collection.image ? (
         <div className="relative aspect-[21/9] overflow-hidden rounded-xl bg-muted">
-          {/* Remote cover URL (same pattern as catalog product imagery). */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          {/* Remote cover URL (Cloudinary is allowlisted in images.remotePatterns). */}
+          <Image
             src={collection.image}
             alt={collection.name}
-            className="h-full w-full object-cover"
+            fill
+            sizes="(max-width: 1280px) 100vw, 1120px"
+            className="object-cover"
+            priority
           />
         </div>
       ) : null}
@@ -80,6 +86,7 @@ export default async function CollectionDetailPage({ params }: CollectionPagePro
               product={card}
               initialSaved={savedIds.has(card.id)}
               promotion={promoSummaries.get(card.id) ?? null}
+              display={display}
             />
           ))}
         </div>

@@ -211,6 +211,62 @@
       "when": 1792800000000,
       "tag": "0029_banner_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792900000000,
+      "tag": "0030_products_slug",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792986400000,
+      "tag": "0031_gp26_orphan_sweep_backup",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793419200000,
+      "tag": "0032_audit_actor_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793505600000,
+      "tag": "0033_user_admin_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793592000000,
+      "tag": "0034_auth_emails",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793678400000,
+      "tag": "0035_low_stock_alert_recipients",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793764800000,
+      "tag": "0036_products_active_created",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793851200000,
+      "tag": "0037_cart_recovery_emails",
+      "breakpoints": true
     }
   ]
 }

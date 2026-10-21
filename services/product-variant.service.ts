@@ -47,6 +47,69 @@ export async function listVariantsByProduct(
     .where(eq(productVariants.productId, productId));
 }
 
+/**
+ * Admin detail read (T-2.1): every variant of a product regardless of
+ * storefront status, with its option values and inventory in two batched
+ * follow-up reads (same shape the storefront VariantSelector consumes, but
+ * uncached and unfiltered). Deterministic: variants ordered by SKU,
+ * option values by option/value sort_order.
+ */
+export async function listVariantsForAdmin(
+  productId: string,
+): Promise<
+  Array<
+    VariantRow & {
+      optionValues: Array<{ optionId: string; optionName: string; valueId: string; value: string }>;
+      quantity: number;
+      reservedQuantity: number;
+    }
+  >
+> {
+  const variantRows = await db
+    .select()
+    .from(productVariants)
+    .where(eq(productVariants.productId, productId))
+    .orderBy(productVariants.sku);
+
+  if (variantRows.length === 0) return [];
+
+  const variantIds = variantRows.map((v) => v.id);
+  const [variantOptions, inventoryRows] = await Promise.all([
+    db.execute(sql`
+      SELECT vov.variant_id, po.id AS option_id, po.name AS option_name,
+             pov.id AS value_id, pov.value
+      FROM variant_option_value vov
+      INNER JOIN product_option_value pov ON pov.id = vov.option_value_id
+      INNER JOIN product_option po ON po.id = pov.option_id
+      WHERE vov.variant_id IN (${sql.join(variantIds.map((id) => sql`${id}`), sql`, `)})
+      ORDER BY po.sort_order, pov.sort_order
+    `) as Promise<Array<{ variant_id: string; option_id: string; option_name: string; value_id: string; value: string }>>,
+    db
+      .select({
+        variantId: inventory.variantId,
+        quantity: inventory.quantity,
+        reservedQuantity: inventory.reservedQuantity,
+      })
+      .from(inventory)
+      .where(inArray(inventory.variantId, variantIds)),
+  ]);
+
+  const optionsByVariant = new Map<string, Array<{ optionId: string; optionName: string; valueId: string; value: string }>>();
+  for (const vo of variantOptions) {
+    const bucket = optionsByVariant.get(vo.variant_id) ?? [];
+    bucket.push({ optionId: vo.option_id, optionName: vo.option_name, valueId: vo.value_id, value: vo.value });
+    optionsByVariant.set(vo.variant_id, bucket);
+  }
+  const inventoryByVariant = new Map(inventoryRows.map((inv) => [inv.variantId, inv]));
+
+  return variantRows.map((variant) => ({
+    ...variant,
+    optionValues: optionsByVariant.get(variant.id) ?? [],
+    quantity: inventoryByVariant.get(variant.id)?.quantity ?? 0,
+    reservedQuantity: inventoryByVariant.get(variant.id)?.reservedQuantity ?? 0,
+  }));
+}
+
 export async function getVariantById(
   id: string,
 ): Promise<VariantRow | null> {
@@ -66,8 +129,9 @@ export async function createVariant(
     .insert(productVariants)
     .values(data)
     .returning();
+  if (!created) throw new Error("Variant insert returned no row");
   logger.catalog.variantCreated(created.id, data.productId, userId ?? "unknown", requestId);
-  return created!;
+  return created;
 }
 
 export async function updateVariant(
@@ -133,6 +197,9 @@ export async function createVariantWithInventory(
       type: "RESTOCK" as typeof inventoryMovementTypeEnum.enumValues[number],
       reason: "Initial variant creation",
       notes: `Variant ${variant.sku ?? variant.id} created with initial inventory`,
+      // Variant authoring is admin-console-only today.
+      actorType: "admin",
+      actorId: userId,
     });
 
     logger.catalog.variantCreated(variant.id, variant.productId, userId ?? "unknown", requestId);

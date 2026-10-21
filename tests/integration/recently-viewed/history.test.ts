@@ -21,9 +21,10 @@ vi.mock("@/shared/lib/guards", () => ({
 }));
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 
 import { testDb } from "../_db";
+import { purgeCategoryFixtures } from "../_fixture-cleanup";
 import {
   categories,
   brands,
@@ -53,6 +54,36 @@ const productIds: string[] = [];
 let draftProductId = "";
 
 beforeAll(async () => {
+  // Wounded-run residue purge (§6 #2). This suite creates 26 ACTIVE fixture
+  // products; if a prior run died before `afterAll` (e.g. a worker crash or a
+  // cancelled pipeline), those stale rows would override the whole
+  // oldest-first default listing order shared by every catalog test. The
+  // fixture slugs/ids are SFX-random, so the purge matches this suite's
+  // prefixes across runs, through the shared cascade-safe helper.
+  const residueCats = await testDb
+    .select({ slug: categories.slug })
+    .from(categories)
+    .where(like(categories.slug, "rv-cat-%"));
+  const residueBrands = await testDb
+    .select({ slug: brands.slug })
+    .from(brands)
+    .where(like(brands.slug, "rv-brand-%"));
+  if (residueCats.length > 0) {
+    await purgeCategoryFixtures(
+      residueCats.map((c) => c.slug),
+      residueBrands.map((b) => b.slug),
+    );
+  }
+  const residueUserIds = (
+    await testDb.select({ id: user.id }).from(user).where(like(user.id, "rv-u-%"))
+  ).map((u) => u.id);
+  if (residueUserIds.length > 0) {
+    await testDb.delete(productViewHistory).where(
+      inArray(productViewHistory.userId, residueUserIds),
+    );
+    await testDb.delete(user).where(inArray(user.id, residueUserIds));
+  }
+
   for (const [key, id] of [["a", `rv-u-a-${SFX}`], ["b", `rv-u-b-${SFX}`]] as const) {
     const [u] = await testDb
       .insert(user)
@@ -68,13 +99,13 @@ beforeAll(async () => {
   for (let i = 0; i < 25; i += 1) {
     const [p] = await testDb
       .insert(products)
-      .values({ name: `RV Product ${i}`, status: "ACTIVE", basePrice: "10.00", categoryId, brandId })
+      .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: `RV Product ${i}`, status: "ACTIVE", basePrice: "10.00", categoryId, brandId })
       .returning();
     productIds.push(p.id);
   }
   const [draft] = await testDb
     .insert(products)
-    .values({ name: "RV Draft", status: "DRAFT", basePrice: "10.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "RV Draft", status: "DRAFT", basePrice: "10.00", categoryId, brandId })
     .returning();
   draftProductId = draft.id;
 });
@@ -135,7 +166,9 @@ describe("recording and ordering", () => {
     expect(await rowCount(userA)).toBe(0);
   });
 
-  it("caps history at the limit with oldest-first pruning", async () => {
+  // 25 recordProductView transactions in real transactions; under full-suite
+  // DB load that exceeds the 5s default. Timeout only — assertions unchanged.
+  it("caps history at the limit with oldest-first pruning", { timeout: 20_000 }, async () => {
     for (const pid of productIds) {
       await recordProductView(userA, pid, new Date(Date.now()));
     }
@@ -234,10 +267,12 @@ describe("guest merge", () => {  it("merges validated entries idempotently and s
     expect(await rowCount(userA)).toBe(2);
   });
 
-  it("prunes only the caller's rows when both customers are at capacity", async () => {
+  // 20 recordProductView transactions each run in their own real transaction;
+  // under full-suite DB load that exceeds the 5s default. Timeout only —
+  // assertions unchanged.
+  it("prunes only the caller's rows when both customers are at capacity", { timeout: 20_000 }, async () => {
     const now = Date.now();
-    for (const pid of productIds.slice(0, 20)) {
-      await recordProductView(userA, pid, new Date(now));
+    for (const pid of productIds.slice(0, 20)) {      await recordProductView(userA, pid, new Date(now));
       await recordProductView(userB, pid, new Date(now));
     }
     expect(await rowCount(userA)).toBe(20);
@@ -267,14 +302,21 @@ describe("guest resolution", () => {
 });
 
 describe("action session scope", () => {
-  it("merges under the session identity", async () => {
+  it("merges under the session identity", { timeout: 20_000 }, async () => {
     sessionStore.userId = userB;
     const { mergeGuestHistoryAction } = await import(
       "@/modules/recently-viewed/presentation/actions/history.actions"
     );
     const res = await mergeGuestHistoryAction([{ id: productIds[7]!, at: Date.now() }]);
     expect(res).toEqual({ ok: true, data: { merged: 1 } });
-    expect(await rowCount(userB)).toBe(1);
+    const rowsForB = await testDb
+      .select({ productId: productViewHistory.productId, viewedAt: productViewHistory.viewedAt })
+      .from(productViewHistory)
+      .where(eq(productViewHistory.userId, userB));
+    if (rowsForB.length !== 1) {
+      console.error("DBG rowsForB", rowsForB, "userB", userB, "p7", productIds[7]);
+    }
+    expect(rowsForB).toHaveLength(1);
     expect(await rowCount(userA)).toBe(0);
   });
 });

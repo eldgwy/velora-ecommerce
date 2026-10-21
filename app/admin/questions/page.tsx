@@ -1,3 +1,5 @@
+import { EmptyState } from "@/shared/components/ui/empty-state";
+
 import Link from "next/link";
 
 import { Button } from "@/shared/components/ui/button";
@@ -69,9 +71,7 @@ export default async function QuestionsPage({ searchParams }: QuestionsPageProps
       </form>
 
       {items.length === 0 ? (
-        <div className="rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
-          <p className="text-sm text-muted-foreground">Nothing here.</p>
-        </div>
+        <EmptyState title="Nothing here" description="Customer questions will appear here once submitted." />
       ) : (
         <ul className="flex flex-col gap-3">
           {items.map((item) => (

@@ -299,6 +299,7 @@ export async function getCollectionCards(
     db
       .select({
         id: products.id,
+        slug: products.slug,
         name: products.name,
         basePrice: products.basePrice,
         comparePrice: products.comparePrice,
@@ -361,7 +362,7 @@ export async function getCollectionCards(
     cards.push({
       id: p.id,
       name: p.name,
-      slug: p.id,
+      slug: p.slug,
       basePrice: p.basePrice,
       comparePrice: p.comparePrice,
       minVariantPrice: minMap.get(pid) ?? null,

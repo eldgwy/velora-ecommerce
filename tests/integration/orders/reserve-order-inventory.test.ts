@@ -133,7 +133,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`,
       name: "Order Res Product",
       status: "ACTIVE",
       basePrice: "10.00",
@@ -292,6 +292,18 @@ describe("reserveOrderInventory", () => {
     const inv = await getInventoryByVariant(variantId1);
     expect(inv?.reservedQuantity).toBe(3);
     expect(inv?.available).toBe(7);
+
+    // Audit-trail durability (GP-22 / migration 0032): the movement row
+    // carries the acting principal.
+    const movements = await testDb
+      .select()
+      .from(inventoryMovements)
+      .where(eq(inventoryMovements.inventoryId, inventoryId1));
+    const reservationMovements = movements.filter((m) => m.type === "RESERVATION");
+    expect(reservationMovements).toHaveLength(1);
+    expect(reservationMovements[0].actorId).toBe("test-admin");
+    // No explicit actorType passed — warehouse/order automation default.
+    expect(reservationMovements[0].actorType).toBe("system");
 
     await testDb.delete(orderItems).where(eq(orderItems.orderId, order.id));
     await testDb.delete(orders).where(eq(orders.id, order.id));
@@ -666,6 +678,9 @@ describe("commitOrderReservation", () => {
     expect(saleMovements).toHaveLength(1);
     expect(saleMovements[0].quantity).toBe(-2);
     expect(saleMovements[0].reason).toContain("fulfilled");
+    // Payment-driven commit is a webhook-context action by default.
+    expect(saleMovements[0].actorType).toBe("webhook");
+    expect(saleMovements[0].actorId).toBe("test-admin");
   });
 
   it("is idempotent: committing already-committed reservation is a no-op", async () => {
@@ -1783,7 +1798,10 @@ describe("expired reservation worker", () => {
     await testDb.delete(orders).where(eq(orders.id, paidOrder.id));
   });
 
-  it("processes a single expired order successfully", async () => {
+  // Worker tests process several real orders (release + notification +
+  // audit per order); the vitest default 5s cap is too tight on loaded
+  // machines or slower disks. Timeout only — all assertions unchanged.
+  it("processes a single expired order successfully", { timeout: 20_000 }, async () => {
     const result = await processExpiredOrder(expiredOrderId, {
       actorId: "test-worker",
       requestId: "test-process-1",
@@ -1906,7 +1924,7 @@ describe("expired reservation worker", () => {
     await testDb.delete(orders).where(eq(orders.id, batchOrder.id));
   });
 
-  it("respects batch size limit", async () => {
+  it("respects batch size limit", { timeout: 20_000 }, async () => {
     // Create many expired orders (more than batch size)
     const manyOrders = [];
     for (let i = 0; i < 5; i++) {

@@ -74,7 +74,7 @@ beforeAll(async () => {
   const makeProduct = async (name: string, status: "ACTIVE" | "DRAFT" | "ARCHIVE") => {
     const [p] = await testDb
       .insert(products)
-      .values({ name, status, basePrice: "49.00", categoryId, brandId })
+      .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name, status, basePrice: "49.00", categoryId, brandId })
       .returning();
     return p.id;
   };
@@ -226,7 +226,7 @@ describe("add product", () => {
   it("serializes concurrent adds to a single row", async () => {
     const [p] = await testDb
       .insert(products)
-      .values({ name: "Race Tee", status: "ACTIVE", basePrice: "29.00", categoryId, brandId })
+      .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "Race Tee", status: "ACTIVE", basePrice: "29.00", categoryId, brandId })
       .returning();
     try {
       const outcomes = await Promise.allSettled(
@@ -290,7 +290,13 @@ describe("get wishlist", () => {
     expect(item?.productName).toBe("Wishlist Jacket");
     expect(item?.basePrice).toBe("49.00");
     expect(item?.status).toBe("ACTIVE");
-    expect(item?.slug).toBe(activeProductId);
+    // Slug is the product's own backfilled URL identifier, no longer the id.
+    const [productRow] = await testDb
+      .select({ slug: products.slug })
+      .from(products)
+      .where(eq(products.id, activeProductId))
+      .then((rows) => rows);
+    expect(item?.slug).toBe(productRow?.slug);
   });
 
   it("lists archived products with their status instead of hiding them", async () => {
@@ -330,7 +336,7 @@ describe("cascades", () => {
   it("deletes items when the product is deleted", async () => {
     const [p] = await testDb
       .insert(products)
-      .values({ name: "Doomed Scarf", status: "ACTIVE", basePrice: "19.00", categoryId, brandId })
+      .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "Doomed Scarf", status: "ACTIVE", basePrice: "19.00", categoryId, brandId })
       .returning();
     await addProductToWishlist(userB, p.id);
     await testDb.delete(products).where(eq(products.id, p.id));

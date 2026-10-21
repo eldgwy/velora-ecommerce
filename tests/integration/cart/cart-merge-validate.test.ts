@@ -1,8 +1,36 @@
 import { vi } from "vitest";
 
+/**
+ * T-4.1/GP-10 regression lens: counts top-level drizzle `select`/`execute`
+ * dispatches issued through the mocked db so the pre-checkout validation
+ * query count can be asserted as bounded regardless of cart size.
+ * Everything else (transactions, tx clients passed to callbacks) falls
+ * through bound to the real testDb.
+ */
+const queryCounter = { select: 0, execute: 0 };
+
 vi.mock("@/infrastructure/database", async () => {
   const { testDb } = await import("../_db");
-  return { db: testDb };
+  const target = testDb as unknown as Record<string, unknown>;
+  const proxy = new Proxy(target, {
+    get(getTarget, prop) {
+      if (prop === "select") {
+        return (...args: unknown[]) => {
+          queryCounter.select += 1;
+          return Reflect.apply(getTarget.select as (...a: unknown[]) => unknown, getTarget, args);
+        };
+      }
+      if (prop === "execute") {
+        return (...args: unknown[]) => {
+          queryCounter.execute += 1;
+          return Reflect.apply(getTarget.execute as (...a: unknown[]) => unknown, getTarget, args);
+        };
+      }
+      const value = Reflect.get(getTarget, prop, target);
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(getTarget) : value;
+    },
+  });
+  return { db: proxy };
 });
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -86,7 +114,7 @@ beforeAll(async () => {
 
   const [prod] = await testDb
     .insert(products)
-    .values({
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`,
       name: "Merge Product",
       status: "ACTIVE",
       basePrice: "20.00",
@@ -270,6 +298,35 @@ describe("guest-to-user merge", () => {
 });
 
 describe("pre-checkout validation", () => {
+  // T-4.1/GP-10 regression: validation issued ~5 queries PER ITEM (plus the
+  // totals loop re-resolving every billable line, plus the per-item expired-
+  // promotion probe). The batched resolver makes the catalog cost FIXED:
+  // ~5 resolution queries + cart/header queries, never scaling with N.
+  it("bounds the query count independent of cart size", async () => {
+    // The shared fixture cart holds multiple distinct variants (vA + vB and
+    // the staged inactive line from tests above).
+    queryCounter.select = 0;
+    queryCounter.execute = 0;
+    const result = await validateCartForCheckout({ kind: "user", userId });
+    const queries = queryCounter.select + queryCounter.execute;
+
+    const distinctVariants = new Set(result.items.map((i) => i.variantId)).size;
+    expect(distinctVariants).toBeGreaterThanOrEqual(2);
+    // Fixed budget: cart header (2) + cart rows (1) + 5 batched resolution
+    // queries + 1 expired-promotion scan. Roomy bound catches regressions
+    // back toward per-item resolution (which would be ≥ distinctVariants*5).
+    expect(queries).toBeLessThanOrEqual(12);
+    const catalogQueries = queries - 4;
+    expect(catalogQueries).toBeLessThanOrEqual(6);
+
+    // Idempotent revalidation must not grow the count (totals reuse the map).
+    queryCounter.select = 0;
+    queryCounter.execute = 0;
+    await validateCartForCheckout({ kind: "user", userId });
+    const secondRun = queryCounter.select + queryCounter.execute;
+    expect(secondRun).toBeLessThanOrEqual(queries);
+  });
+
   it("detects price changes while preserving the snapshot", async () => {
     await testDb
       .update(products)

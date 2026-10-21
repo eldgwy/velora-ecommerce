@@ -12,28 +12,54 @@ import { VerifiedBuyerBadge } from "@/modules/reviews/presentation/components/ve
 import type { ModerationQueueItem } from "@/modules/reviews/application/queries/reviews";
 
 /**
- * Moderation queue row actions. Only PENDING rows offer transitions; the
- * server re-validates state, so stale or repeated clicks resolve safely.
+ * Moderation queue row actions (T-5.4): pending rows decide approve/reject;
+ * moderated rows offer re-moderation (back to pending) and direct flips.
+ * The server re-validates every transition, so stale or repeated clicks
+ * resolve safely.
  */
+/** Moderation targets mirror the action's zod enum (content never edited). */
+type ModerationTarget = "pending" | "approved" | "rejected";
+
 export function ModerationActions({ item }: { item: ModerationQueueItem }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  if (item.status !== "pending") {
-    return <span className="text-xs text-muted-foreground">Already moderated ({item.status}).</span>;
-  }
-
-  const run = (status: "approved" | "rejected") => {
+  const run = (status: ModerationTarget) => {
     startTransition(async () => {
       const res = await moderateReviewAction({ reviewId: item.id, status });
       if ("error" in res) {
         toast.error(res.error);
       } else {
-        toast.success(status === "approved" ? "Review approved." : "Review rejected.");
+        toast.success(
+          status === "approved"
+            ? "Review approved."
+            : status === "rejected"
+              ? "Review rejected."
+              : "Review re-opened for moderation.",
+        );
         router.refresh();
       }
     });
   };
+
+  if (item.status !== "pending") {
+    return (
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => run("rejected")}>
+          {pending ? <Spinner className="size-4" /> : null}
+          Reject
+        </Button>
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => run("approved")}>
+          {pending ? <Spinner className="size-4" /> : null}
+          Approve
+        </Button>
+        <Button size="sm" variant="ghost" disabled={pending} onClick={() => run("pending")}>
+          {pending ? <Spinner className="size-4" /> : null}
+          Re-moderate
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex gap-2">

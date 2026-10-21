@@ -64,6 +64,7 @@ async function convergeGuestCart(userId: string): Promise<void> {
   if (!verified) return;
   try {
     const result = await mergeGuestCartIntoUserCart(userId, verified.guestId);
+    // eslint-disable-next-line drizzle/enforce-delete-with-where -- cookies() jar, not a drizzle table
     if (result.guestCartConsumed) jar.delete(GUEST_CART_COOKIE_NAME);
   } catch (error) {
     logger.error("Checkout guest merge failed", {

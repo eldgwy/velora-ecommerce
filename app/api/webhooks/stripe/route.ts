@@ -3,13 +3,24 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/infrastructure/database";
 import { payments, webhookEvents } from "@/infrastructure/database/schema/orders";
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { logger } from "@/shared/lib/logging/logger";
 import { verifyStripeSignature } from "@/modules/orders/application/webhooks/verify-signature";
 import { finalizeOrderPayment, handlePaymentFailureWebhook } from "@/modules/orders/application/commands/finalize-payment";
 import { dispatchOrderNotification } from "@/modules/notifications/application/order-emails";
 
 export const runtime = "nodejs";
+
+/**
+ * PROCESSING rows hold the in-flight claim. If a worker dies mid-event the
+ * row would otherwise be un-reclaimable and Stripe deliveries deflect
+ * forever. After this much silence another delivery re-claims the row via a
+ * compare-and-set on the lease (see claim below), matching the notification
+ * queue's lease-recovery convention. Applying the financial event twice is
+ * still impossible: the CAS ensures one claimant, and finalize/failure
+ * commands are guarded server-side by order/payment state.
+ */
+const WEBHOOK_PROCESSING_LEASE_MS = 10 * 60 * 1000;
 
 interface StripeEvent {
   id: string;
@@ -74,7 +85,7 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
 
   // Check if we've already processed this event
   const [existingEvent] = await db
-    .select({ id: webhookEvents.id, status: webhookEvents.status, attempts: webhookEvents.attempts })
+    .select({ id: webhookEvents.id, status: webhookEvents.status, attempts: webhookEvents.attempts, updatedAt: webhookEvents.updatedAt })
     .from(webhookEvents)
     .where(
       and(
@@ -82,6 +93,8 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
         eq(webhookEvents.providerEventId, eventId),
       ),
     );
+
+  let claimTaken = false;
 
   if (existingEvent) {
     if (existingEvent.status === "COMPLETED") {
@@ -94,34 +107,70 @@ async function processStripeEvent(event: StripeEvent): Promise<{ success: boolea
       return { success: true };
     }
     if (existingEvent.status === "PROCESSING") {
-      logger.warn("Webhook event currently being processed", {
+      const leaseCutoff = new Date(Date.now() - WEBHOOK_PROCESSING_LEASE_MS);
+      const stale = existingEvent.updatedAt === null || existingEvent.updatedAt < leaseCutoff;
+      if (!stale) {
+        logger.warn("Webhook event currently being processed", {
+          module: "webhooks",
+          action: "stripeWebhookConcurrent",
+          eventId,
+          orderId,
+        });
+        return { success: false, error: "Event currently being processed" };
+      }
+      // Compare-and-set re-claim: only one recovery claimant wins. A loser
+      // sees the row still PROCESSING with a fresh lease and deflects here.
+      const [claimed] = await db
+        .update(webhookEvents)
+        .set({
+          status: "PROCESSING",
+          attempts: (existingEvent.attempts || 0) + 1,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(webhookEvents.id, existingEvent.id),
+            eq(webhookEvents.status, "PROCESSING"),
+            lt(webhookEvents.updatedAt, leaseCutoff),
+          ),
+        )
+        .returning({ id: webhookEvents.id });
+      if (!claimed) {
+        return { success: false, error: "Event currently being processed" };
+      }
+      logger.warn("Webhook event re-claimed after lease expiry", {
         module: "webhooks",
-        action: "stripeWebhookConcurrent",
+        action: "stripeWebhookLeaseRecovery",
         eventId,
         orderId,
+        attempts: (existingEvent.attempts || 0) + 1,
       });
-      return { success: false, error: "Event currently being processed" };
+      // Fall through to event processing with the claim already taken.
+      claimTaken = true;
     }
     // If FAILED, we can retry
   }
 
-  // Mark event as processing
-  if (existingEvent) {
-    await db
-      .update(webhookEvents)
-      .set({ status: "PROCESSING", attempts: (existingEvent.attempts || 0) + 1, updatedAt: new Date() })
-      .where(eq(webhookEvents.id, existingEvent.id));
-  } else {
-    await db.insert(webhookEvents).values({
-      provider: "stripe",
-      providerEventId: eventId,
-      eventType,
-      orderId,
-      paymentId,
-      status: "PROCESSING",
-      attempts: 1,
-      payload: JSON.stringify(event),
-    });
+  // Mark event as processing (skipped when a stale-lease re-claim above
+  // already took the claim).
+  if (!claimTaken) {
+    if (existingEvent) {
+      await db
+        .update(webhookEvents)
+        .set({ status: "PROCESSING", attempts: (existingEvent.attempts || 0) + 1, updatedAt: new Date() })
+        .where(eq(webhookEvents.id, existingEvent.id));
+    } else {
+      await db.insert(webhookEvents).values({
+        provider: "stripe",
+        providerEventId: eventId,
+        eventType,
+        orderId,
+        paymentId,
+        status: "PROCESSING",
+        attempts: 1,
+        payload: JSON.stringify(event),
+      });
+    }
   }
 
   try {

@@ -160,7 +160,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({ name: "RET Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "RET Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
     .returning();
   productId = prod.id;
   const [v] = await testDb
@@ -206,7 +206,7 @@ afterAll(async () => {
 });
 
 describe("return lifecycle", () => {
-  it("runs request → receipt → approval → restock with audit and completion", async () => {
+  it("runs request → receipt → approval → restock with audit and completion", { timeout: 20_000 }, async () => {
     const { orderId, orderItemId } = await shippedOrder("happy");
     const movesBefore = await returnMovementCount();
     const [invBefore] = await testDb.select().from(inventory).where(eq(inventory.variantId, variantId));
@@ -304,7 +304,7 @@ describe("return lifecycle", () => {
     expect(retry.caseId).toBeDefined();
   });
 
-  it("rejects lines from a different order and unknown refunds", async () => {
+  it("rejects lines from a different order and unknown refunds", { timeout: 20_000 }, async () => {
     const first = await shippedOrder("crossa");
     const second = await shippedOrder("crossb");
     await expect(

@@ -176,8 +176,9 @@ export async function createCategory(
   requestId?: string,
 ): Promise<CategoryRow> {
   const [created] = await db.insert(categories).values(data).returning();
+  if (!created) throw new Error("Category insert returned no row");
   logger.catalog.categoryCreated(created.id, userId ?? "unknown", requestId);
-  return created!;
+  return created;
 }
 
 export async function updateCategory(

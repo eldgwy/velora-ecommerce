@@ -1,5 +1,4 @@
 import { Metadata } from "next";
-import Image from "next/image";
 import { notFound } from "next/navigation";
 import { getProductBySlug, getProductReviews } from "@/services/catalog-public";
 import { ProductReviewSection } from "@/modules/reviews/presentation/components/review-section";
@@ -8,9 +7,10 @@ import { RecordProductView } from "@/modules/recently-viewed/presentation/compon
 import { RecentViewsSection } from "@/modules/recently-viewed/presentation/components/recent-views-section";
 import { GuestRecentViews } from "@/modules/recently-viewed/presentation/components/guest-recent-views";
 import { getVariantPromotionViews } from "@/modules/promotions/application/queries/promotion-pricing";
-import { fromMinorUnits } from "@/modules/checkout/domain/money";
+import { fromMinorUnits, toMinorUnits } from "@/modules/checkout/domain/money";
 import Link from "next/link";
 import VariantSelector from "@/shared/components/product/VariantSelector";
+import { ProductGallery } from "@/shared/components/product/ProductGallery";
 import { PromotionPrice } from "@/shared/components/product/PromotionPrice";
 import { WishlistToggle } from "@/modules/wishlist/presentation/components/WishlistToggle";
 import { getSavedProductIds } from "@/modules/wishlist/application/queries/wishlist";
@@ -29,6 +29,9 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
   return {
     title: product.name,
     description: product.description ?? undefined,
+    // Legacy product-UUID URLs declare the slug URL as canonical (GP-29):
+    // crawlers index one deterministic address per product.
+    alternates: { canonical: `/products/${product.slug}` },
     openGraph: {
       title: product.name,
       description: product.description ?? undefined,
@@ -49,7 +52,6 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
   const reviewsPage = Math.max(1, parseInt(search.reviewsPage ?? "1", 10) || 1);
   const questionsPage = Math.max(1, parseInt(search.questionsPage ?? "1", 10) || 1);
 
-  const primaryImage = product.images.find((i) => i.isPrimary) ?? product.images[0];
 
   // Fetch reviews
   const reviewsResult = await getProductReviews(product.id);
@@ -88,8 +90,57 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
     };
   }
 
+  // GP-29: Product JSON-LD, composed strictly from data already resolved
+  // for this render (no extra reads, no invented values). Prices are the
+  // same effective promotion prices shown in the selector; availability
+  // reflects the product's ACTIVE variants and their live stock windows.
+  const purchasableVariants = product.variants.filter((v) => v.status === "ACTIVE");
+  const effectivePrices = purchasableVariants.map(
+    (v) => promoViews.get(v.id)?.effectiveCents ?? toMinorUnits(v.priceOverride ?? product.basePrice, "USD"),
+  );
+  const productJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description: product.description ?? undefined,
+    image: product.images.map((i) => i.url),
+    ...(product.brand ? { brand: { "@type": "Brand", name: product.brand.name } } : {}),
+    ...(reviewsResult.reviewCount > 0 && reviewsResult.averageRating !== null
+      ? {
+          aggregateRating: {
+            "@type": "AggregateRating",
+            ratingValue: reviewsResult.averageRating,
+            reviewCount: reviewsResult.reviewCount,
+          },
+        }
+      : {}),
+    offers: {
+      "@type": "AggregateOffer",
+      priceCurrency: "USD",
+      ...(effectivePrices.length > 0
+        ? { lowPrice: Math.min(...effectivePrices), highPrice: Math.max(...effectivePrices) }
+        : {}),
+      ...(purchasableVariants.length > 0
+        ? {
+            offerCount: purchasableVariants.length,
+            availability: purchasableVariants.some((v) => v.availableStock > 0)
+              ? "https://schema.org/InStock"
+              : "https://schema.org/OutOfStock",
+          }
+        : { availability: "https://schema.org/Discontinued" }),
+    },
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
+      <script
+        type="application/ld+json"
+        // Static object of server-resolved primitives; `<` is escaped so a
+        // description cannot close the script tag early (JSON-LD hygiene).
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(productJsonLd).replace(/</g, "\\u003c"),
+        }}
+      />
       {/* Breadcrumb */}
       <nav className="mb-6" aria-label="Breadcrumb">
         <ol className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -102,38 +153,7 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
       <div className="grid lg:grid-cols-2 gap-8">
         {/* Product Gallery */}
         <section className="space-y-4">
-          <div className="aspect-square relative rounded-lg overflow-hidden bg-muted">
-            {primaryImage ? (
-              <Image
-                src={primaryImage.url}
-                alt={primaryImage.alt ?? product.name}
-                fill
-                sizes="(max-width: 1024px) 100vw, 50vw"
-                className="object-cover"
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-muted-foreground">No Image</div>
-            )}
-          </div>
-
-          {product.images.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              {product.images.map((image) => (
-                <button
-                  key={image.id}
-                  className={`flex-shrink-0 aspect-square w-20 rounded overflow-hidden border-2 transition-colors ${
-                    image.isPrimary ? "border-primary" : "border-transparent hover:border-accent"
-                  }`}
-                  onClick={() => {
-                    // In a real implementation, this would update the main image
-                    console.log("Select image:", image.id);
-                  }}
-                >
-                  <Image src={image.url} alt={image.alt ?? ""} width={80} height={80} className="h-full w-full object-cover" />
-                </button>
-              ))}
-            </div>
-          )}
+          <ProductGallery images={product.images} productName={product.name} />
         </section>
 
         {/* Product Info */}
@@ -188,15 +208,18 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
             <VariantSelector key={product.id} product={product} promotionViews={selectorViews} />
           )}
 
-          {/* Add to Cart */}
-          <div className="flex gap-4 pt-4 border-t">
-            <button className="flex-1 btn btn-primary btn-lg">Add to Cart</button>
+          {/* Add to Cart actions live inside VariantSelector (optioned and
+              simple products); wishlist stays alongside. */}
+          <div className="flex items-center gap-4 pt-4 border-t">
             <WishlistToggle
               productId={product.id}
               productName={product.name}
               initialSaved={savedIds.has(product.id)}
               className="size-11 shrink-0 !rounded-lg"
             />
+            <span className="text-sm text-muted-foreground">
+              Save to wishlist
+            </span>
           </div>
 
           {/* Product Options Info */}
@@ -218,13 +241,8 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
         </section>
       </div>
 
-      {/* Tabs for Description, Specs, Reviews */}
+      {/* Detail sections (description already shown above; reviews and Q&A below) */}
       <div className="mt-12 border-t">
-        <nav className="flex gap-6 border-b" aria-label="Product tabs">
-          <button className="pb-3 font-medium text-primary border-b-2 border-primary">Description</button>
-          <button className="pb-3 font-medium text-muted-foreground hover:text-foreground">Specifications</button>
-          <button className="pb-3 font-medium text-muted-foreground hover:text-foreground">Reviews ({reviewsResult.reviewCount})</button>
-        </nav>
         <div className="py-6 prose prose-muted max-w-none">
           <p>{product.description ?? "No description available."}</p>
         </div>

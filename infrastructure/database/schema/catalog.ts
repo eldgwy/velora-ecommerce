@@ -97,6 +97,13 @@ export const products = pgTable("products", {
     categoryId: uuid("category_id").notNull().references(() => categories.id, { onDelete: "restrict", }),
 
     brandId: uuid("brand_id").notNull().references(() => brands.id, { onDelete: "restrict", }),
+
+    /**
+     * Public URL identifier (see migration 0030): slugified name + short id
+     * suffix for determinism. Legacy product-id URLs keep resolving via the
+     * ID-compatibility match in getProductBySlug.
+     */
+    slug: text("slug").notNull(),
   },
   (table) => [
     index("products_category_id_idx").on(
@@ -104,6 +111,8 @@ export const products = pgTable("products", {
     ),
 
     index("products_brand_id_idx").on(table.brandId),
+
+    uniqueIndex("products_slug_unique_idx").on(table.slug),
 
     index("products_status_idx").on(table.status),
 

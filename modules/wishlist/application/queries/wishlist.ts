@@ -47,6 +47,7 @@ export async function getWishlistDetail(userId: string): Promise<WishlistDetail>
     .select({
       itemId: wishlistItems.id,
       productId: products.id,
+      slug: products.slug,
       productName: products.name,
       basePrice: products.basePrice,
       comparePrice: products.comparePrice,
@@ -69,7 +70,6 @@ export async function getWishlistDetail(userId: string): Promise<WishlistDetail>
 
   const items: WishlistListItem[] = rows.map((row) => ({
     ...row,
-    slug: row.productId,
   }));
 
   return { wishlistId: wishlist.id, items, itemCount: items.length };

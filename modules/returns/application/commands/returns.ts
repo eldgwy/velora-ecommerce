@@ -418,7 +418,8 @@ export async function restockReturn(
         quantity: item.quantity,
         type: "RETURN",
         reason: `Return ${item.caseId} line ${itemId} restocked for order ${item.orderId}`,
-        notes: `actor:${opts.actorId}`,
+        actorType: opts.actorType ?? "staff",
+        actorId: opts.actorId,
       })
       .returning({ id: inventoryMovements.id });
     if (!movement) throw new Error("Return movement insert failed");

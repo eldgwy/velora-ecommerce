@@ -9,6 +9,10 @@ import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
 import { Spinner } from "@/shared/components/ui/spinner";
 import { Textarea } from "@/shared/components/ui/textarea";
+import {
+  ALLOWED_IMAGE_TYPES,
+  validateImageFile,
+} from "@/shared/lib/image-validation";
 import { StarRatingInput } from "@/modules/reviews/presentation/components/star-rating";
 import {
   getReviewImageUploadParamsAction,
@@ -16,8 +20,6 @@ import {
 } from "@/modules/reviews/presentation/actions/review.actions";
 
 const MAX_FILES = 4;
-const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/avif"];
 
 async function uploadOne(
   file: File,
@@ -77,8 +79,9 @@ export function ReviewForm({ productId, signedIn }: { productId: string; signedI
       return;
     }
     for (const file of files) {
-      if (!ALLOWED_TYPES.includes(file.type) || file.size === 0 || file.size > MAX_BYTES) {
-        toast.error(`"${file.name}" is not an accepted image (JPEG/PNG/WebP/GIF/AVIF, ≤10 MB).`);
+      const check = validateImageFile({ mimeType: file.type, size: file.size, filename: file.name });
+      if (!check.valid) {
+        toast.error(`"${file.name}": ${check.error}`);
         return;
       }
     }
@@ -140,7 +143,7 @@ export function ReviewForm({ productId, signedIn }: { productId: string; signedI
         <Input
           id="review-photos"
           type="file"
-          accept={ALLOWED_TYPES.join(",")}
+          accept={ALLOWED_IMAGE_TYPES.join(",")}
           multiple
           onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, MAX_FILES))}
         />

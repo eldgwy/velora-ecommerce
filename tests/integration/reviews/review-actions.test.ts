@@ -19,6 +19,7 @@ vi.mock("@/shared/lib/guards", () => ({ requireAdmin: requireAdminSpy }));
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
+import { purgeCategoryFixtures } from "../_fixture-cleanup";
 import {
   categories,
   brands,
@@ -36,6 +37,10 @@ let rootId = "",
 let reviewId = "";
 
 beforeAll(async () => {
+  // Crash-residue hardening: a previous run wounded mid-suite must never
+  // poison this file's fixed-name fixtures. Cascade-safe purge keyed on our
+  // own static fixture slugs only (see _fixture-cleanup.ts).
+  await purgeCategoryFixtures(["rev-root", "rev-child"], ["rev-brand"]);
   const [root] = await testDb.insert(categories).values({ slug: "rev-root", name: "Rev Root" }).returning();
   rootId = root.id;
   const [child] = await testDb
@@ -47,7 +52,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({ name: "Rev Product", status: "ACTIVE", basePrice: "10.00", categoryId: childId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "Rev Product", status: "ACTIVE", basePrice: "10.00", categoryId: childId, brandId })
     .returning();
   productId = prod.id;
 });
@@ -66,7 +71,9 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await testDb.delete(reviews);
+  // Shared-DB hygiene: purge ONLY this suite's fixture reviews — an
+  // unscoped delete would wipe other suites' rows mid-run.
+  await testDb.delete(reviews).where(eq(reviews.productId, productId));
   await testDb.delete(products).where(eq(products.id, productId));
   await testDb.delete(brands).where(eq(brands.id, brandId));
   await testDb.delete(categories).where(eq(categories.id, childId));
@@ -81,6 +88,10 @@ describe("moderateReview service (real DB)", () => {
 
     const row = await getReviewById(reviewId);
     expect(row?.status).toBe("approved");
+    // Audited moderation (migration 0032): actor + moment persisted only on
+    // an actual transition.
+    expect(row?.moderatedBy).toBe("test-admin");
+    expect(row?.moderatedAt).toBeInstanceOf(Date);
   });
 
   it("rejects a pending review", async () => {

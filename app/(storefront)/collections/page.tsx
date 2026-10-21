@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 import { listPublicCollections } from "@/modules/collections/application/queries/collections";
 
@@ -38,12 +39,13 @@ export default async function CollectionsPage() {
               <Link href={`/collections/${c.slug}`} className="group block">
                 <div className="relative aspect-[16/9] overflow-hidden rounded-xl bg-muted">
                   {c.image ? (
-                    // Remote cover URL (same pattern as catalog product imagery).
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    // Remote cover URL (Cloudinary is allowlisted in images.remotePatterns).
+                    <Image
                       src={c.image}
                       alt={c.name}
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      fill
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                      className="transition-transform duration-300 group-hover:scale-105"
                       loading="lazy"
                     />
                   ) : (

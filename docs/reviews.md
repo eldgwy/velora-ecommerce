@@ -88,8 +88,10 @@ mutations refresh via `router.refresh()`. Display data rides the existing
 - Integration: submission (pending default, duplicates, concurrent
   duplicates, validation, eligibility, images, folder scoping),
   verified-buyer (delivered vs shipped vs foreign), queue (context,
-  approve/reject, already-moderated, unauthorized), storefront (approved
-  only, aggregates, pagination, empty state).
+  approve/reject, re-moderate + no-op replay — moderation is REVERSIBLE
+  as of T-5.4: any non-self status transition incl. re-open from
+  approved/rejected; submission text/rating remains immutable),
+  storefront (approved only, aggregates, pagination, empty state).
 - Preserved: existing moderation service/aggregate/action suites untouched
   and green.
 - Limitations: no review editing/deletion by customers; no appeal flow;

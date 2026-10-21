@@ -42,7 +42,7 @@ function getInitials(name: string): string {
     .split(" ")
     .filter(Boolean)
     .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
+    .map((w) => w.charAt(0).toUpperCase())
     .join("");
 }
 
@@ -76,7 +76,7 @@ function UserAvatar({ image, name, className = "" }: UserAvatarProps) {
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
 
-const Navbar = () => {
+const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) => {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -229,6 +229,8 @@ const Navbar = () => {
 
           {/* Actions – desktop */}
           <div className="hidden items-center gap-2 md:flex">
+            {/* Display currency selector (server-slot; hidden without rates) */}
+            {currencySelector}
             {/* Search */}
             <Button
               variant="ghost"
@@ -402,6 +404,9 @@ const Navbar = () => {
             >
               <SearchIcon className="size-4" />
             </Button>
+
+            {/* Display currency selector (server-slot; hidden without rates) */}
+            {currencySelector}
 
             {/* Cart Mobile */}
             <Link

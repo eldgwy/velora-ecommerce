@@ -194,7 +194,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({ name: "WHH Product", status: "ACTIVE", basePrice: "40.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "WHH Product", status: "ACTIVE", basePrice: "40.00", categoryId, brandId })
     .returning();
   productId = prod.id;
   const [v] = await testDb
@@ -430,5 +430,71 @@ describe("failure events after refunds", () => {
       requestRefund({ orderId: order.id, amountCents: 100, reason: "extra", actorId: "admin-1" }),
     ).rejects.toThrow(/Nothing remains refundable/);
     expect(refundsCreateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("stale PROCESSING lease recovery", () => {
+  it("deflects a fresh PROCESSING row without touching the order", async () => {
+    const { order, payment } = await reservedOrder("40.00", "leasefresh");
+    const fresh = new Date();
+    await testDb.insert(webhookEvents).values({
+      provider: "stripe",
+      providerEventId: `evt_whh_lease_${SFX}_fresh`,
+      eventType: "payment_intent.succeeded",
+      orderId: order.id,
+      paymentId: payment.id,
+      status: "PROCESSING",
+      attempts: 1,
+      payload: JSON.stringify({}) as unknown as { [key: string]: unknown },
+      updatedAt: fresh,
+    });
+    const event = succeededEvent(`pi_whh_leasefresh_${SFX}`, 4000, "usd", `evt_whh_lease_${SFX}_fresh`);
+    const res = await postEvent(JSON.stringify(event), signWebhook(JSON.stringify(event)));
+    expect(res.status).toBe(500); // deflected
+
+    const [row] = await testDb
+      .select()
+      .from(webhookEvents)
+      .where(and(eq(webhookEvents.provider, "stripe"), eq(webhookEvents.providerEventId, `evt_whh_lease_${SFX}_fresh`)));
+    expect(row!.status).toBe("PROCESSING");
+    expect(row!.attempts).toBe(1); // untouched attempts: no concurrent reclaim
+    const [kept] = await testDb.select().from(orders).where(eq(orders.id, order.id));
+    expect(kept!.paymentStatus).toBe("PENDING"); // no financial application
+  });
+
+  it("re-claims an expired PROCESSING row and finalizes exactly once", async () => {
+    const { order, payment } = await reservedOrder("40.00", "leasestale");
+    const staleTimestamp = new Date(Date.now() - 11 * 60 * 1000);
+    await testDb.insert(webhookEvents).values({
+      provider: "stripe",
+      providerEventId: `evt_whh_lease_${SFX}_stale`,
+      eventType: "payment_intent.succeeded",
+      orderId: order.id,
+      paymentId: payment.id,
+      status: "PROCESSING",
+      attempts: 1,
+      payload: JSON.stringify({}) as unknown as { [key: string]: unknown },
+      updatedAt: staleTimestamp,
+    });
+    const event = succeededEvent(`pi_whh_leasestale_${SFX}`, 4000, "usd", `evt_whh_lease_${SFX}_stale`);
+    const res = await postEvent(JSON.stringify(event), signWebhook(JSON.stringify(event)));
+    expect(res.status).toBe(200);
+
+    const [row] = await testDb
+      .select()
+      .from(webhookEvents)
+      .where(and(eq(webhookEvents.provider, "stripe"), eq(webhookEvents.providerEventId, `evt_whh_lease_${SFX}_stale`)));
+    expect(row!.status).toBe("COMPLETED");
+    expect(row!.attempts).toBe(2); // reclaim bumped attempts
+    const [done] = await testDb.select().from(orders).where(eq(orders.id, order.id));
+    expect(done!.status).toBe("PROCESSING");
+    expect(done!.paymentStatus).toBe("PAID");
+    expect(await movementCount(order.id, "SALE")).toBe(1);
+    expect(await historyCount(order.id, "payment_succeeded")).toBe(1);
+
+    // Redelivering the same event stays idempotent.
+    const again = await postEvent(JSON.stringify(event), signWebhook(JSON.stringify(event)));
+    expect(again.status).toBe(200);
+    expect(await movementCount(order.id, "SALE")).toBe(1);
   });
 });

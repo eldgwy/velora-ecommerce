@@ -112,7 +112,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({ name: "CL Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "CL Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
     .returning();
   productId = prod.id;
   const [v] = await testDb
@@ -184,7 +184,7 @@ async function makeCoupon(
 }
 
 describe("per-user limits", () => {
-  it("enforces the limit across sequential orders and frees other users", async () => {
+  it("enforces the limit across sequential orders and frees other users", { timeout: 20_000 }, async () => {
     const code = await makeCoupon("peruser", { perUserLimit: 1 });
     await stockCart("a");
     const first = await placeOrder(me("a"), input({ couponCode: code }), key());

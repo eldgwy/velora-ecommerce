@@ -2,12 +2,16 @@ import { Metadata } from "next";
 import { searchProducts, getActiveBrands, getCategoryTree } from "@/services/catalog-public";
 import { getProductPromotionSummaries } from "@/modules/promotions/application/queries/promotion-pricing";
 import { ProductCard } from "@/shared/components/product/ProductCard";
+import { buildDisplayCurrencyProps } from "@/shared/lib/currency-display-server";
 import {
   InStockCheckbox,
   RatingFilter,
   SortSelect,
 } from "@/shared/components/product/CatalogFilterControls";
 import Link from "next/link";
+import { Input } from "@/shared/components/ui/input";
+import { Button, buttonVariants } from "@/shared/components/ui/button";
+import { buildFilterHref } from "@/shared/lib/filter-links";
 import { getCurrentSession } from "@/shared/lib/guards";
 import { getSavedProductIds } from "@/modules/wishlist/application/queries/wishlist";
 
@@ -33,6 +37,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 async function ProductsContent({ searchParams }: ProductsPageProps) {
   const params = await searchParams;
+  const display = await buildDisplayCurrencyProps();
   const page = Math.max(1, parseInt(params.page ?? "1", 10));
 
   const filters = {
@@ -78,13 +83,13 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
             <h3 className="font-semibold mb-3">Categories</h3>
             <nav className="space-y-1">
               <Link
-                href="/products"
+                href={buildFilterHref("/products", { ...params }, { category: undefined })}
                 className={`block px-2 py-1 rounded text-sm ${!params.category ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
               >
                 All Categories
               </Link>
               {categories.map((cat) => (
-                <CategoryFilterLink key={cat.id} category={cat} selected={params.category} level={0} />
+                <CategoryFilterLink key={cat.id} category={cat} selected={params.category} level={0} currentParams={{ ...params }} />
               ))}
             </nav>
           </section>
@@ -94,7 +99,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
             <h3 className="font-semibold mb-3">Brands</h3>
             <nav className="space-y-1 max-h-64 overflow-y-auto">
               <Link
-                href="/products"
+                href={buildFilterHref("/products", { ...params }, { brand: undefined })}
                 className={`block px-2 py-1 rounded text-sm ${!params.brand ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
               >
                 All Brands
@@ -102,7 +107,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
               {brands.map((brand) => (
                 <Link
                   key={brand.id}
-                  href={`/products?brand=${brand.slug}${params.category ? `&category=${params.category}` : ""}`}
+                  href={buildFilterHref("/products", { ...params }, { brand: brand.slug })}
                   className={`block px-2 py-1 rounded text-sm ${params.brand === brand.slug ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}
                 >
                   {brand.name}
@@ -116,26 +121,24 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
             <h3 className="font-semibold mb-3">Price Range</h3>
             <form className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <input
+                <Input
                   type="number"
                   name="minPrice"
                   placeholder="Min"
                   defaultValue={params.minPrice ?? ""}
-                  className="input input-sm"
                   step="0.01"
                   min="0"
                 />
-                <input
+                <Input
                   type="number"
                   name="maxPrice"
                   placeholder="Max"
                   defaultValue={params.maxPrice ?? ""}
-                  className="input input-sm"
                   step="0.01"
                   min="0"
                 />
               </div>
-              <button type="submit" className="btn btn-sm btn-primary w-full">Apply</button>
+              <Button type="submit" size="sm" className="w-full">Apply</Button>
             </form>
           </section>
 
@@ -178,6 +181,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
                   product={product}
                   initialSaved={savedIds.has(product.id)}
                   promotion={promoSummaries.get(product.id) ?? null}
+                  display={display}
                 />
               ))}
             </div>
@@ -189,7 +193,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
               {page > 1 && (
                 <Link
                   href={`?${new URLSearchParams({ ...Object.fromEntries(Object.entries(params).filter(([k]) => k !== "page")), page: String(page - 1) }).toString()}`}
-                  className="btn btn-outline btn-sm"
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
                 >
                   Previous
                 </Link>
@@ -200,7 +204,7 @@ async function ProductsContent({ searchParams }: ProductsPageProps) {
               {page < productsResult.totalPages && (
                 <Link
                   href={`?${new URLSearchParams({ ...Object.fromEntries(Object.entries(params).filter(([k]) => k !== "page")), page: String(page + 1) }).toString()}`}
-                  className="btn btn-outline btn-sm"
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
                 >
                   Next
                 </Link>
@@ -217,10 +221,12 @@ function CategoryFilterLink({
   category,
   selected,
   level = 0,
+  currentParams,
 }: {
   category: Awaited<ReturnType<typeof getCategoryTree>>[0];
   selected?: string;
   level: number;
+  currentParams: Record<string, string | undefined>;
 }) {
   const isSelected = selected === category.slug;
   const hasChildren = category.children.length > 0;
@@ -228,7 +234,7 @@ function CategoryFilterLink({
   return (
     <div className="pl-4" style={{ paddingLeft: `${level * 16 + 8}px` }}>
       <Link
-        href={`/products?category=${category.slug}`}
+        href={buildFilterHref("/products", currentParams, { category: category.slug })}
         className={`block px-2 py-1 rounded text-sm ${isSelected ? "bg-primary text-primary-foreground font-medium" : "hover:bg-accent"}`}
       >
         {category.name}
@@ -236,7 +242,7 @@ function CategoryFilterLink({
       {hasChildren && (
         <nav className="space-y-1 mt-1">
           {category.children.map((child) => (
-            <CategoryFilterLink key={child.id} category={child} selected={selected} level={level + 1} />
+            <CategoryFilterLink key={child.id} category={child} selected={selected} level={level + 1} currentParams={currentParams} />
           ))}
         </nav>
       )}

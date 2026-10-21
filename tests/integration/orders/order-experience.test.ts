@@ -124,7 +124,7 @@ beforeAll(async () => {
   brandId = br.id;
   const [prod] = await testDb
     .insert(products)
-    .values({ name: "OE Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "OE Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
     .returning();
   productId = prod.id;
   const [v] = await testDb

@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/infrastructure/database";
+import { env } from "@/config/env";
 import { products } from "@/infrastructure/database/schema/catalog";
 import { orderItems, orders } from "@/infrastructure/database/schema/orders";
 import { productVariants } from "@/infrastructure/database/schema/catalog";
@@ -32,11 +33,42 @@ export interface SubmitReviewInput {
   images?: ReviewImageInput[];
 }
 
-function assertImageInput(image: ReviewImageInput, index: number): { url: string; publicId: string } {
+/**
+ * Review images must have been uploaded through the runner's own signed
+ * upload flow (GP-15): `getReviewImageUploadParamsAction` signs uploads ONLY
+ * into `velora/reviews/<authorId>/`, so a reference outside that folder was
+ * not produced by this application — the client cannot sign uploads into
+ * another user's folder, and cross-cloud/hand-crafted delivery URLs are
+ * rejected the same way. This prevents review images from hot-linking
+ * arbitrary external or other-customer assets.
+ */
+function assertImageInput(
+  image: ReviewImageInput,
+  index: number,
+  userId: string,
+): { url: string; publicId: string } {
   const publicId = image.publicId?.trim() ?? "";
   if (publicId.length === 0 || publicId.length > 255) {
     throw new ReviewValidationError(`Image ${index + 1}: provider reference is invalid.`);
   }
+
+  // The signed upload folder is derived from the session user id; reject a
+  // reference whose folder segment does not exactly match the author's own.
+  const folderPrefix = `velora/reviews/${userId}/`;
+  const basename = publicId.startsWith(folderPrefix) ? publicId.slice(folderPrefix.length) : null;
+  if (
+    basename === null ||
+    basename.length === 0 ||
+    basename.includes("..") ||
+    // Better Auth ids are URL-safe (alnum/underscore/dash); anything else in
+    // the id never came from a signed flow.
+    !/^[A-Za-z0-9_-]+$/.test(userId)
+  ) {
+    throw new ReviewValidationError(
+      `Image ${index + 1}: reference was not uploaded through your own upload session.`,
+    );
+  }
+
   let url: URL;
   try {
     url = new URL(image.url);
@@ -46,6 +78,20 @@ function assertImageInput(image: ReviewImageInput, index: number): { url: string
   if (url.protocol !== "https:") {
     throw new ReviewValidationError(`Image ${index + 1}: URL must use HTTPS.`);
   }
+
+  // Delivery URL must be this cloud's image endpoint and must actually point
+  // at the submitted publicId: `/<cloud>/image/upload/[v<version>/]<publicId>[.<ext>]`.
+  // Derived/transformed variants of the same asset stay acceptable via the
+  // publicId prefix; anything else is a hand-crafted reference.
+  const pathPrefix = `/${env.CLOUDINARY_CLOUD_NAME}/image/upload/`;
+  const escapedPublicId = publicId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const deliveryPattern = new RegExp(`^${pathPrefix}(?:v\\d+/)?${escapedPublicId}(\\.\\w+)?$`);
+  if (url.hostname !== "res.cloudinary.com" || !deliveryPattern.test(url.pathname)) {
+    throw new ReviewValidationError(
+      `Image ${index + 1}: URL does not match the uploaded reference.`,
+    );
+  }
+
   return { url: url.toString(), publicId };
 }
 
@@ -105,7 +151,7 @@ export async function submitReview(input: SubmitReviewInput): Promise<{ id: stri
   if (images.length > MAX_REVIEW_IMAGES) {
     throw new ReviewValidationError(`At most ${MAX_REVIEW_IMAGES} images per review.`);
   }
-  const validatedImages = images.map(assertImageInput);
+  const validatedImages = images.map((image, index) => assertImageInput(image, index, input.userId));
 
   const [product] = await db
     .select({ id: products.id, status: products.status })

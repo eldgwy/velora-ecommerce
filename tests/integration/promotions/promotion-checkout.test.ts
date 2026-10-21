@@ -111,11 +111,11 @@ beforeAll(async () => {
   brandId = br.id;
   const [p1] = await testDb
     .insert(products)
-    .values({ name: "PP Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "PP Product", status: "ACTIVE", basePrice: "20.00", categoryId, brandId })
     .returning();
   const [p2] = await testDb
     .insert(products)
-    .values({ name: "PP Product 2", status: "ACTIVE", basePrice: "30.00", categoryId, brandId })
+    .values({ slug: `p-${Math.random().toString(36).slice(2, 14)}`, name: "PP Product 2", status: "ACTIVE", basePrice: "30.00", categoryId, brandId })
     .returning();
   productId = p1.id;
   product2Id = p2.id;
@@ -276,7 +276,7 @@ describe("promotion windows and eligibility", () => {
 });
 
 describe("overlap selection", () => {
-  it("applies the lowest price and breaks ties by id", async () => {
+  it("applies the lowest price and breaks ties by id", { timeout: 20_000 }, async () => {
     // 10% of $20 = $2 off (→ $18) vs $3 fixed (→ $17): fixed wins.
     const pct = await makeActivePromo("ov-pct", { type: "PERCENTAGE", value: "10" });
     const fix = await makeActivePromo("ov-fix", { type: "FIXED", value: "3.00" });

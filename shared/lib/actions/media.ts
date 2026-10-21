@@ -126,11 +126,11 @@ export async function reorderImages(
 
   try {
     // Update sortOrder for each image
-    for (let i = 0; i < imageIds.length; i++) {
+    for (const [i, imageId] of imageIds.entries()) {
       await db
         .update(productImages)
         .set({ sortOrder: i, updatedAt: new Date() })
-        .where(eq(productImages.id, imageIds[i]));
+        .where(eq(productImages.id, imageId));
     }
 
     invalidateImageCache(imageIds[0] ?? "", productId);

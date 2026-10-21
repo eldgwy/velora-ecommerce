@@ -14,6 +14,21 @@
       "path": "/api/internal/jobs/notification-retry",
       "schedule": "*/5 * * * *",
       "method": "POST"
+    },
+    {
+      "path": "/api/internal/jobs/auth-email-retry",
+      "schedule": "*/5 * * * *",
+      "method": "POST"
+    },
+    {
+      "path": "/api/internal/jobs/sync-banners",
+      "schedule": "0 * * * *",
+      "method": "POST"
+    },
+    {
+      "path": "/api/internal/jobs/cart-recovery",
+      "schedule": "0 * * * *",
+      "method": "POST"
     }
   ]
 }
