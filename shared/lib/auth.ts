@@ -337,27 +337,44 @@ export const auth = betterAuth({
       // After successful sign-in/sign-up, adjust session cookie maxAge
       const rememberMe = (ctx.context as { _rememberMe?: boolean })._rememberMe ?? false;
 
-      if (ctx.context?.session?.session?.token) {
+      // Adjust the session cookie on the sign-in response. Better Auth core
+      // writes it with the 7-day expiresIn — or as a bare browser-session
+      // cookie when rememberMe is unchecked — and never honors the 30-day
+      // "remember me" option. `ctx.context.session` is not populated on this
+      // path, so the token comes from the sign-in response body.
+      if (ctx.path === "/sign-in/email") {
         const sessionTokenCookie = ctx.context.authCookies?.sessionToken;
-        if (sessionTokenCookie) {
+        const token = (ctx.context as { returned?: { token?: string } })
+          .returned?.token;
+
+        if (sessionTokenCookie && token) {
           const maxAge = rememberMe
             ? REMEMBERED_SESSION_EXPIRES_IN_SECONDS // 30 days
             : SESSION_EXPIRES_IN_SECONDS; // 7 days
 
-          // Overwrite the session cookie with correct maxAge
-          ctx.setCookie(sessionTokenCookie.name, ctx.context.session.session.token, {
-            ...sessionTokenCookie.attributes,
-            maxAge,
-          });
-        }
+          // This MUST go through setSignedCookie: Better Auth verifies the
+          // cookie's HMAC on every getSession, so writing the raw token
+          // (ctx.setCookie) silently produced an unsigned cookie and every
+          // guarded navigation bounced back to /login (sessions "not saved").
+          await ctx.setSignedCookie(
+            sessionTokenCookie.name,
+            token,
+            ctx.context.secret,
+            {
+              ...sessionTokenCookie.attributes,
+              maxAge,
+            },
+          );
 
-        // Remove dont_remember token so Better Auth's 24h logic doesn't activate
-        const dontRememberCookie = ctx.context.authCookies?.dontRememberToken;
-        if (dontRememberCookie) {
-          ctx.setCookie(dontRememberCookie.name, "", {
-            ...dontRememberCookie.attributes,
-            maxAge: 0,
-          });
+          // Remove dont_remember token so Better Auth's browser-session
+          // logic doesn't override the 7-day lifetime we just set.
+          const dontRememberCookie = ctx.context.authCookies?.dontRememberToken;
+          if (dontRememberCookie) {
+            ctx.setCookie(dontRememberCookie.name, "", {
+              ...dontRememberCookie.attributes,
+              maxAge: 0,
+            });
+          }
         }
       }
     }),

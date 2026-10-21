@@ -143,7 +143,7 @@ const Promotion = () => {
       className="px-4 py-14 md:px-6 md:py-20 lg:px-10 lg:py-24"
     >
       <div className="mx-auto max-w-360">
-        <div className="relative overflow-hidden rounded-2xl bg-primary lg:h-97">
+        <div className="relative overflow-hidden rounded-2xl bg-primary lg:h-97 dark:bg-velora-emerald-dark">
           <div className="grid lg:h-full lg:grid-cols-[0.9fr_1.1fr]">
             {/* =========================================
                 CONTENT

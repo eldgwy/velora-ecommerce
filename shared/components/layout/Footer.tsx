@@ -145,7 +145,7 @@ const Footer = () => {
   return (
     <footer
       ref={footerRef}
-      className="relative overflow-hidden bg-primary text-white"
+      className="relative overflow-hidden bg-primary text-white dark:bg-velora-emerald-dark"
     >
       {/* Decorative Background */}
       <div
