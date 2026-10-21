@@ -12,8 +12,8 @@ export default async function AdminLayout({
   const session = await requireAdmin();
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f4f2ee]">
-      <header className="border-b border-border/60 bg-white/80 backdrop-blur">
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="border-b border-border/60 bg-card/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-4">
           <Link
             href="/admin"

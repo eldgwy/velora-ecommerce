@@ -78,7 +78,7 @@ export function ModerationActions({ item }: { item: ModerationQueueItem }) {
 /** Queue row: product, author, rating, text, eligibility, images. */
 export function ModerationRow({ item }: { item: ModerationQueueItem }) {
   return (
-    <li className="flex flex-col gap-2 rounded-xl bg-white p-4 ring-1 ring-foreground/10">
+    <li className="flex flex-col gap-2 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium">{item.productName ?? "Removed product"}</span>
         <StarRatingDisplay rating={item.rating} />

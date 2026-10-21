@@ -57,7 +57,7 @@ export function WishlistToggle({
       aria-pressed={saved}
       aria-label={saved ? `Remove ${productName} from wishlist` : `Add ${productName} to wishlist`}
       className={cn(
-        "flex size-8 items-center justify-center rounded-full border border-white/50 bg-white/75 text-foreground backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white hover:text-red-500 motion-reduce:transition-none disabled:opacity-60",
+        "flex size-8 items-center justify-center rounded-full border border-white/50 bg-white/75 text-foreground backdrop-blur-md transition-all duration-300 hover:scale-105 hover:bg-white hover:text-red-500 dark:bg-velora-glass-strong dark:hover:bg-velora-glass-strong motion-reduce:transition-none disabled:opacity-60",
         saved && "border-red-200 bg-red-50 text-red-500",
         className,
       )}

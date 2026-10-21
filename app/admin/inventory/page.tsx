@@ -69,7 +69,7 @@ export default async function InventoryPage({ searchParams }: InventoryPageProps
           { label: "Failed", value: alertStats.failed },
           { label: "Total", value: alertStats.total },
         ].map((s) => (
-          <div key={s.label} className="rounded-xl bg-white p-4 ring-1 ring-foreground/10">
+          <div key={s.label} className="rounded-xl bg-card p-4 ring-1 ring-foreground/10">
             <p className="text-2xl font-semibold">{s.value}</p>
             <p className="text-xs text-muted-foreground">{s.label}</p>
           </div>
@@ -77,7 +77,7 @@ export default async function InventoryPage({ searchParams }: InventoryPageProps
       </div>
 
       {lowStock.length > 0 ? (
-        <section className="rounded-xl bg-white p-5 ring-1 ring-amber-300/60">
+        <section className="rounded-xl bg-card p-5 ring-1 ring-amber-300/60">
           <h2 className="text-base font-semibold text-amber-800">Low stock now ({lowStock.length})</h2>
           <ul className="mt-2 grid gap-1.5 text-sm sm:grid-cols-2">
             {lowStock.map((l) => {
@@ -122,7 +122,7 @@ export default async function InventoryPage({ searchParams }: InventoryPageProps
             const available = r.quantity - r.reservedQuantity;
             const isLow = lowVariantIds.has(r.variantId);
             return (
-              <div key={r.variantId} className={`flex flex-col gap-2 rounded-xl bg-white p-4 ring-1 ${isLow ? "ring-amber-300/60" : "ring-foreground/10"}`}>
+              <div key={r.variantId} className={`flex flex-col gap-2 rounded-xl bg-card p-4 ring-1 ${isLow ? "ring-amber-300/60" : "ring-foreground/10"}`}>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-medium">{r.productName}</span>
                   <span className="text-xs text-muted-foreground">{r.sku ?? r.variantId}</span>
@@ -146,8 +146,8 @@ export default async function InventoryPage({ searchParams }: InventoryPageProps
           <span className="text-muted-foreground">
             Page {page} of {totalPages}
           </span>
-          {page > 1 ? <a href={pageHref(page - 1)} className="rounded-lg border border-border bg-white px-3 py-1.5 hover:bg-muted">← Prev</a> : null}
-          {page < totalPages ? <a href={pageHref(page + 1)} className="rounded-lg border border-border bg-white px-3 py-1.5 hover:bg-muted">Next →</a> : null}
+          {page > 1 ? <a href={pageHref(page - 1)} className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted">← Prev</a> : null}
+          {page < totalPages ? <a href={pageHref(page + 1)} className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted">Next →</a> : null}
         </div>
       ) : null}
     </div>

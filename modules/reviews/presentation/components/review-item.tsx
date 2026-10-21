@@ -7,7 +7,7 @@ import type { PublicReviewView } from "@/modules/reviews/application/queries/rev
 /** One approved review: author, rating, text, images, verified badge. */
 export function ReviewItem({ review }: { review: PublicReviewView }) {
   return (
-    <article className="flex flex-col gap-2 rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+    <article className="flex flex-col gap-2 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <div className="flex flex-wrap items-center gap-2">
         <StarRatingDisplay rating={review.rating} />
         {review.isVerifiedBuyer ? <VerifiedBuyerBadge /> : null}

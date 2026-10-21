@@ -19,7 +19,7 @@ export function AdminTableSkeleton({ rows = 5 }: { rows?: number }) {
         <Skeleton className="h-9 w-64" />
         <Skeleton className="h-9 w-28" />
       </div>
-      <div className="rounded-xl bg-white ring-1 ring-foreground/10">
+      <div className="rounded-xl bg-card ring-1 ring-foreground/10">
         <div className="border-b border-border px-4 py-3">
           <Skeleton className="h-4 w-96" />
         </div>
@@ -61,7 +61,7 @@ export function AuthCardSkeleton() {
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4 py-16" aria-busy="true" aria-live="polite">
       <Skeleton className="mx-auto h-10 w-40" />
-      <div className="rounded-2xl bg-white p-6 ring-1 ring-foreground/10">
+      <div className="rounded-2xl bg-card p-6 ring-1 ring-foreground/10">
         <Skeleton className="mb-2 h-6 w-2/3" />
         <Skeleton className="mb-6 h-4 w-1/2" />
         {Array.from({ length: 3 }).map((_, i) => (

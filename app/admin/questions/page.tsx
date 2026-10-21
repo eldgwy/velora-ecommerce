@@ -32,7 +32,7 @@ export default async function QuestionsPage({ searchParams }: QuestionsPageProps
 
   if (!res.ok || !res.data) {
     return (
-      <div className="flex flex-col items-center gap-4 rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
+      <div className="flex flex-col items-center gap-4 rounded-xl bg-card px-6 py-16 text-center ring-1 ring-foreground/10">
         <h1 className="text-2xl font-semibold">We couldn&apos;t load questions</h1>
         <p className="text-sm text-muted-foreground">{res.ok ? "Please try again." : res.error}</p>
       </div>
@@ -75,7 +75,7 @@ export default async function QuestionsPage({ searchParams }: QuestionsPageProps
       ) : (
         <ul className="flex flex-col gap-3">
           {items.map((item) => (
-            <li key={item.id} className="flex flex-col gap-2 rounded-xl bg-white p-4 ring-1 ring-foreground/10">
+            <li key={item.id} className="flex flex-col gap-2 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="font-medium">{item.productName ?? "Removed product"}</span>
                 <Link

@@ -64,7 +64,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
     return (
       <div className="flex flex-col gap-5">
         <h1 className="text-2xl font-semibold">Orders</h1>
-        <div className="flex flex-col items-center gap-4 rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
+        <div className="flex flex-col items-center gap-4 rounded-xl bg-card px-6 py-16 text-center ring-1 ring-foreground/10">
           <p className="text-sm text-muted-foreground">{res.ok ? "Please try again." : res.error}</p>
         </div>
       </div>

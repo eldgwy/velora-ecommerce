@@ -62,7 +62,7 @@ export function PromotionForm({ initial }: { initial?: PromotionDetail }) {
   return (
     <form
       action={onSubmit}
-      className="flex max-w-xl flex-col gap-4 rounded-xl bg-white p-5 ring-1 ring-foreground/10"
+      className="flex max-w-xl flex-col gap-4 rounded-xl bg-card p-5 ring-1 ring-foreground/10"
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1">

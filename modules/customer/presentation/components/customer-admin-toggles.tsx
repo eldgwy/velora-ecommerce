@@ -75,7 +75,7 @@ export function CustomerAdminToggles({
   };
 
   return (
-    <section className="flex flex-col gap-4 rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+    <section className="flex flex-col gap-4 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <h2 className="text-base font-semibold">Account controls</h2>
       <form action={toggleStatus} className="flex flex-wrap items-center gap-3">
         <span className="text-sm text-muted-foreground">

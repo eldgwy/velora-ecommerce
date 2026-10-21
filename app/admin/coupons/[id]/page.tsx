@@ -25,7 +25,7 @@ export default async function CouponDetailPage({ params }: CouponDetailPageProps
   if (!res.ok || !res.data) {
     if (!res.ok && res.error === "Coupon not found.") notFound();
     return (
-      <div className="flex flex-col items-center gap-4 rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
+      <div className="flex flex-col items-center gap-4 rounded-xl bg-card px-6 py-16 text-center ring-1 ring-foreground/10">
         <h1 className="text-2xl font-semibold">We couldn&apos;t load that coupon</h1>
         <p className="text-sm text-muted-foreground">{res.ok ? "Please try again." : res.error}</p>
         <Button size="lg" render={<Link href="/admin/coupons">Back to coupons</Link>} />
@@ -59,7 +59,7 @@ export default async function CouponDetailPage({ params }: CouponDetailPageProps
           </section>
 
           <section
-            className="rounded-xl bg-white p-5 ring-1 ring-foreground/10"
+            className="rounded-xl bg-card p-5 ring-1 ring-foreground/10"
             aria-label="Redemption history"
           >
             <h2 className="mb-3 text-base font-semibold">
@@ -94,7 +94,7 @@ export default async function CouponDetailPage({ params }: CouponDetailPageProps
 
         <div className="flex flex-col gap-5">
           <section
-            className="rounded-xl bg-white p-5 text-sm ring-1 ring-foreground/10"
+            className="rounded-xl bg-card p-5 text-sm ring-1 ring-foreground/10"
             aria-label="Activation"
           >
             <h2 className="mb-2 text-base font-semibold">Activation</h2>

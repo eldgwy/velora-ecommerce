@@ -37,7 +37,7 @@ export async function ProductReviewSection({
       <h2 className="text-xl font-semibold">Customer reviews</h2>
 
       {summary.reviewCount === 0 ? (
-        <div className="rounded-xl bg-white px-6 py-10 text-center ring-1 ring-foreground/10">
+        <div className="rounded-xl bg-card px-6 py-10 text-center ring-1 ring-foreground/10">
           <p className="text-sm text-muted-foreground">
             No reviews yet. Be the first to share your experience.
           </p>

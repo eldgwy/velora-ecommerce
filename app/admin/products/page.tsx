@@ -57,7 +57,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
             className={`rounded-lg border px-3 py-1.5 font-medium transition-colors ${
               (status ?? "all") === s
                 ? "border-velora-emerald bg-velora-emerald/10 text-velora-emerald"
-                : "border-border bg-white hover:bg-muted"
+                : "border-border bg-card hover:bg-muted"
             }`}
           >
             {s === "all" ? "All" : s}
@@ -68,7 +68,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
       {products.length === 0 ? (
         <EmptyState title="No products match" description="Create one to begin." />
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-foreground/10">
+        <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-foreground/10">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs text-muted-foreground">

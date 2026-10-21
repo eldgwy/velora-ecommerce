@@ -39,7 +39,7 @@ export function CurrencySelector({
 
   return (
     <label
-      className="relative inline-flex items-center rounded-full border border-border/70 bg-white/50 backdrop-blur-md"
+      className="relative inline-flex items-center rounded-full border border-border/70 bg-white/50 backdrop-blur-md dark:bg-velora-glass"
       aria-label="Display currency"
     >
       <select

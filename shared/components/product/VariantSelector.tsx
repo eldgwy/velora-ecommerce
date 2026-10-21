@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { formatPrice } from "@/shared/lib/utils";
 import { AddToCartButton } from "@/shared/components/product/AddToCartButton";
+import { BuyNowButton } from "@/shared/components/product/BuyNowButton";
 
 interface ProductVariant {
   id: string;
@@ -115,12 +116,20 @@ export function VariantSelector({ product, promotionViews }: VariantSelectorProp
             SKU: {defaultVariant.sku}
           </p>
         )}
-        <AddToCartButton
-          variantId={defaultVariant?.id ?? null}
-          disabled={!simpleInStock}
-          disabledLabel={defaultVariant ? "Out of Stock" : "Unavailable"}
-          className="w-full"
-        />
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <AddToCartButton
+            variantId={defaultVariant?.id ?? null}
+            disabled={!simpleInStock}
+            disabledLabel={defaultVariant ? "Out of Stock" : "Unavailable"}
+            className="flex-1"
+          />
+          <BuyNowButton
+            variantId={defaultVariant?.id ?? null}
+            disabled={!simpleInStock}
+            disabledLabel={defaultVariant ? "Out of Stock" : "Unavailable"}
+            className="flex-1"
+          />
+        </div>
       </div>
     );
   }
@@ -227,7 +236,7 @@ export function VariantSelector({ product, promotionViews }: VariantSelectorProp
       )}
 
       {/* Purchase action */}
-      <div className="pt-2">
+      <div className="flex flex-col gap-3 pt-2 sm:flex-row">
         <AddToCartButton
           variantId={resolvedVariant?.id ?? null}
           disabled={!isCompleteSelection || !isInStock}
@@ -236,7 +245,17 @@ export function VariantSelector({ product, promotionViews }: VariantSelectorProp
               ? "Select Options"
               : "Out of Stock"
           }
-          className="w-full"
+          className="flex-1"
+        />
+        <BuyNowButton
+          variantId={resolvedVariant?.id ?? null}
+          disabled={!isCompleteSelection || !isInStock}
+          disabledLabel={
+            !isCompleteSelection
+              ? "Select Options"
+              : "Out of Stock"
+          }
+          className="flex-1"
         />
       </div>
     </fieldset>

@@ -236,7 +236,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
               variant="ghost"
               aria-label="Search"
               onClick={() => setIsSearchOpen((prev) => !prev)}
-              className="group h-10 w-10 overflow-hidden rounded-full border border-border/70 bg-white/50 p-0 backdrop-blur-md transition-all duration-300 hover:w-24 hover:border-velora-gold/60 hover:bg-white"
+              className="group h-10 w-10 overflow-hidden rounded-full border border-border/70 bg-white/50 p-0 backdrop-blur-md transition-all duration-300 hover:w-24 hover:border-velora-gold/60 hover:bg-white dark:bg-velora-glass dark:hover:bg-velora-glass-strong"
             >
               <div className="flex items-center gap-2">
                 <SearchIcon className="size-4 shrink-0" />
@@ -249,7 +249,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
             {/* User / Login */}
             {isPending ? (
               /* Skeleton while session resolves */
-              <span className="size-10 animate-pulse rounded-full border border-border/70 bg-white/50 backdrop-blur-md" />
+              <span className="size-10 animate-pulse rounded-full border border-border/70 bg-white/50 backdrop-blur-md dark:bg-velora-glass" />
             ) : user ? (
               /* ── Authenticated: avatar + dropdown ── */
               <DropdownMenu>
@@ -267,7 +267,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                 <DropdownMenuContent
                   align="end"
                   sideOffset={8}
-                  className="w-56 rounded-2xl border border-border/60 bg-white/90 p-1.5 shadow-[0_16px_48px_rgba(24,28,26,0.12)] backdrop-blur-xl"
+                  className="w-56 rounded-2xl border border-border/60 bg-white/90 p-1.5 shadow-[0_16px_48px_rgba(24,28,26,0.12)] backdrop-blur-xl dark:border-velora-glass-border dark:bg-velora-glass-strong"
                 >
                   {/* User info header */}
                   <DropdownMenuLabel className="flex items-center gap-3 px-2 py-2">
@@ -315,7 +315,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                     render={
                       <Link
                         href="/account/profile"
-                        className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-sm text-foreground transition-colors hover:bg-velora-emerald/8 hover:text-velora-emerald"
+                        className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-sm text-foreground transition-colors hover:bg-velora-emerald/8 hover:text-velora-emerald dark:hover:text-velora-sage"
                       />
                     }
                   >
@@ -327,7 +327,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                     render={
                       <Link
                         href="/account/settings"
-                        className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-sm text-foreground transition-colors hover:bg-velora-emerald/8 hover:text-velora-emerald"
+                        className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-sm text-foreground transition-colors hover:bg-velora-emerald/8 hover:text-velora-emerald dark:hover:text-velora-sage"
                       />
                     }
                   >
@@ -340,7 +340,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                       render={
                         <Link
                           href="/admin"
-                          className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-sm text-foreground transition-colors hover:bg-velora-emerald/8 hover:text-velora-emerald"
+                          className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-sm text-foreground transition-colors hover:bg-velora-emerald/8 hover:text-velora-emerald dark:hover:text-velora-sage"
                         />
                       }
                     >
@@ -365,7 +365,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
               <Link
                 href="/login"
                 aria-label="Login"
-                className="group flex h-10 w-10 items-center justify-center gap-2 overflow-hidden rounded-full border border-border/70 bg-white/50 backdrop-blur-md transition-all duration-300 hover:w-20 hover:border-velora-gold/60 hover:bg-white"
+                className="group flex h-10 w-10 items-center justify-center gap-2 overflow-hidden rounded-full border border-border/70 bg-white/50 backdrop-blur-md transition-all duration-300 hover:w-20 hover:border-velora-gold/60 hover:bg-white dark:bg-velora-glass dark:hover:bg-velora-glass-strong"
               >
                 <UserRound className="size-4 shrink-0" />
                 <span className="max-w-0 overflow-hidden whitespace-nowrap text-xs opacity-0 transition-all duration-300 group-hover:max-w-10 group-hover:opacity-100">
@@ -400,7 +400,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
               size="icon"
               aria-label="Search"
               onClick={() => setIsSearchOpen((prev) => !prev)}
-              className="size-10 rounded-full border border-border/70 bg-white/60 backdrop-blur-md"
+              className="size-10 rounded-full border border-border/70 bg-white/60 backdrop-blur-md dark:bg-velora-glass"
             >
               <SearchIcon className="size-4" />
             </Button>
@@ -427,7 +427,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
               aria-label={isOpen ? "Close menu" : "Open menu"}
               aria-expanded={isOpen}
               onClick={() => setIsOpen((prev) => !prev)}
-              className="size-10 rounded-full border border-border/70 bg-white/60 backdrop-blur-md"
+              className="size-10 rounded-full border border-border/70 bg-white/60 backdrop-blur-md dark:bg-velora-glass"
             >
               {isOpen ? <X className="size-5" /> : <Menu className="size-5" />}
             </Button>
@@ -436,7 +436,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
 
         {/* Mobile drawer */}
         {isOpen && (
-          <div className="absolute left-3 right-3 top-[calc(100%+8px)] rounded-3xl border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(24,28,26,0.10)] backdrop-blur-2xl md:hidden">
+          <div className="absolute left-3 right-3 top-[calc(100%+8px)] rounded-3xl border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(24,28,26,0.10)] backdrop-blur-2xl md:hidden dark:border-velora-glass-border dark:bg-velora-glass-strong dark:shadow-none">
             <div className="p-6">
               {/* Links */}
               <ul className="flex flex-col">
@@ -455,8 +455,8 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                         aria-current={active ? "page" : undefined}
                         className={`flex items-center justify-between border-b border-border-subtle py-5 font-display text-2xl transition-colors duration-300 ${
                           active
-                            ? "text-velora-emerald"
-                            : "text-foreground hover:text-velora-emerald"
+                            ? "text-velora-emerald dark:text-velora-sage"
+                            : "text-foreground hover:text-velora-emerald dark:hover:text-velora-sage"
                         }`}
                         onClick={() => setIsOpen(false)}
                       >
@@ -486,7 +486,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                 {user ? (
                   <div className="flex flex-col gap-2">
                     {/* User info card */}
-                    <div className="flex items-center gap-3 rounded-2xl border border-border/60 bg-white/60 px-4 py-3 backdrop-blur-md">
+                    <div className="flex items-center gap-3 rounded-2xl border border-border/60 bg-white/60 px-4 py-3 backdrop-blur-md dark:border-velora-glass-border dark:bg-velora-glass">
                       <UserAvatar
                         image={user.image}
                         name={user.name}
@@ -529,7 +529,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                     <Link
                       href="/account/profile"
                       onClick={() => setIsOpen(false)}
-                      className="flex items-center gap-2.5 rounded-2xl border border-border/60 bg-white/60 px-4 py-3 text-sm font-medium backdrop-blur-md transition-colors hover:border-velora-gold"
+                      className="flex items-center gap-2.5 rounded-2xl border border-border/60 bg-white/60 px-4 py-3 text-sm font-medium backdrop-blur-md transition-colors hover:border-velora-gold dark:border-velora-glass-border dark:bg-velora-glass"
                     >
                       <User className="size-4 text-muted-foreground" />
                       Profile
@@ -538,7 +538,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                     <Link
                       href="/account/settings"
                       onClick={() => setIsOpen(false)}
-                      className="flex items-center gap-2.5 rounded-2xl border border-border/60 bg-white/60 px-4 py-3 text-sm font-medium backdrop-blur-md transition-colors hover:border-velora-gold"
+                      className="flex items-center gap-2.5 rounded-2xl border border-border/60 bg-white/60 px-4 py-3 text-sm font-medium backdrop-blur-md transition-colors hover:border-velora-gold dark:border-velora-glass-border dark:bg-velora-glass"
                     >
                       <Settings className="size-4 text-muted-foreground" />
                       Settings
@@ -548,7 +548,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                       <Link
                         href="/admin"
                         onClick={() => setIsOpen(false)}
-                        className="flex items-center gap-2.5 rounded-2xl border border-velora-emerald/30 bg-velora-emerald/5 px-4 py-3 text-sm font-medium text-velora-emerald backdrop-blur-md transition-colors hover:border-velora-gold"
+                        className="flex items-center gap-2.5 rounded-2xl border border-velora-emerald/30 bg-velora-emerald/5 px-4 py-3 text-sm font-medium text-velora-emerald backdrop-blur-md transition-colors hover:border-velora-gold dark:text-velora-sage"
                       >
                         <ShieldCheck className="size-4" />
                         Admin dashboard
@@ -569,7 +569,7 @@ const Navbar = ({ currencySelector }: { currencySelector?: React.ReactNode }) =>
                 ) : (
                   <Link
                     href="/login"
-                    className="flex items-center justify-center gap-2 rounded-full border border-border bg-white/60 px-5 py-3 text-sm font-medium backdrop-blur-md transition-colors duration-300 hover:border-velora-gold"
+                    className="flex items-center justify-center gap-2 rounded-full border border-border bg-white/60 px-5 py-3 text-sm font-medium backdrop-blur-md transition-colors duration-300 hover:border-velora-gold dark:border-velora-glass-border dark:bg-velora-glass"
                     onClick={() => setIsOpen(false)}
                   >
                     <UserRound className="size-4" />

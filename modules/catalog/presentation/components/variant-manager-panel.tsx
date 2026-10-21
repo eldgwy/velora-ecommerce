@@ -104,7 +104,7 @@ export function VariantManagerPanel({
   const available = (v: AdminVariant) => Math.max(0, v.quantity - v.reservedQuantity);
 
   return (
-    <section className="flex flex-col gap-4 rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+    <section className="flex flex-col gap-4 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <h2 className="text-base font-semibold">
         Variants <span className="text-sm font-normal text-muted-foreground">({variants.length})</span>
       </h2>

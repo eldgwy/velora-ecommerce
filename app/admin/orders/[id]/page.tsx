@@ -28,7 +28,7 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
   if (!res.ok || !res.data) {
     if (!res.ok && res.error === "Order not found.") notFound();
     return (
-      <div className="flex flex-col items-center gap-4 rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
+      <div className="flex flex-col items-center gap-4 rounded-xl bg-card px-6 py-16 text-center ring-1 ring-foreground/10">
         <h1 className="text-2xl font-semibold">We couldn&apos;t load that order</h1>
         <p className="text-sm text-muted-foreground">{res.ok ? "Please try again." : res.error}</p>
         <Button size="lg" render={<Link href="/admin/orders">Back to orders</Link>} />
@@ -61,7 +61,7 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
 
       <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-5">
-          <section className="rounded-xl bg-white p-5 ring-1 ring-foreground/10" aria-label="Items">
+          <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Items">
             <h2 className="mb-3 text-base font-semibold">Items (snapshots)</h2>
             <ul className="flex flex-col gap-2 text-sm">
               {order.items.map((item) => (
@@ -103,7 +103,7 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
             </dl>
           </section>
 
-          <section className="rounded-xl bg-white p-5 ring-1 ring-foreground/10" aria-label="Audit trail">
+          <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Audit trail">
             <h2 className="mb-3 text-base font-semibold">Event history</h2>
             {order.history.length === 0 ? (
               <p className="text-sm text-muted-foreground">No events recorded yet.</p>
@@ -141,7 +141,7 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
         </div>
 
         <div className="flex flex-col gap-5">
-          <section className="rounded-xl bg-white p-5 ring-1 ring-foreground/10" aria-label="Fulfillment actions">
+          <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Fulfillment actions">
             <AdminOrderControls
               orderId={order.id}
               status={order.status}
@@ -149,7 +149,7 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
               paymentMethod={order.paymentMethod}
             />
           </section>
-          <section className="rounded-xl bg-white p-5 ring-1 ring-foreground/10" aria-label="Refunds and returns">
+          <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Refunds and returns">
             <h2 className="mb-3 text-base font-semibold">Refunds & returns</h2>
             <AdminReturnControls
               orderId={order.id}
@@ -163,7 +163,7 @@ export default async function AdminOrderDetailsPage({ params }: AdminOrderDetail
               refundSummary={refundSummary}
             />
           </section>
-          <section className="rounded-xl bg-white p-5 text-sm ring-1 ring-foreground/10" aria-label="Delivery">
+          <section className="rounded-xl bg-card p-5 text-sm ring-1 ring-foreground/10" aria-label="Delivery">
             <h2 className="mb-2 text-base font-semibold">Ship to</h2>
             <p className="font-medium">
               {[shipping?.firstName, shipping?.lastName].filter(Boolean).join(" ") || "—"}

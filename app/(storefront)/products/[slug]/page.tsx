@@ -203,12 +203,13 @@ async function ProductContent({ params, searchParams }: ProductPageProps) {
             </div>
           )}
 
-          {/* Variant Selection */}
-          {product.variants.length > 0 && (
-            <VariantSelector key={product.id} product={product} promotionViews={selectorViews} />
-          )}
+          {/* Variant selection + purchase actions. Always rendered: the
+              selector itself shows the honest state — a simple product
+              without variant rows (nothing purchasable yet) displays a
+              disabled control instead of hiding the area entirely. */}
+          <VariantSelector key={product.id} product={product} promotionViews={selectorViews} />
 
-          {/* Add to Cart actions live inside VariantSelector (optioned and
+          {/* Purchase actions live inside VariantSelector (optioned and
               simple products); wishlist stays alongside. */}
           <div className="flex items-center gap-4 pt-4 border-t">
             <WishlistToggle

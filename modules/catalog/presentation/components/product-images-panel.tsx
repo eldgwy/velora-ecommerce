@@ -125,7 +125,7 @@ export function ProductImagesPanel({
   };
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+    <section className="flex flex-col gap-3 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold">Images</h2>
         <label className="cursor-pointer rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted">

@@ -221,6 +221,10 @@
   --color-velora-gold-dark: var(--velora-gold-dark);
   --color-velora-clay: var(--velora-clay);
 
+  --color-velora-glass: var(--velora-glass);
+  --color-velora-glass-strong: var(--velora-glass-strong);
+  --color-velora-glass-border: var(--velora-glass-border);
+
   /* Fonts */
   --font-display: var(--font-display);
   --font-sans: var(--font-sans);

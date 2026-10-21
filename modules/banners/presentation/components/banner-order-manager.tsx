@@ -46,7 +46,7 @@ export function BannerOrderManager({ banners }: { banners: BannerListItem[] }) {
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+    <div className="flex flex-col gap-2 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <h2 className="text-base font-semibold">Display order</h2>
       {visible.length === 0 ? (
         <p className="text-xs text-muted-foreground">No banners yet.</p>

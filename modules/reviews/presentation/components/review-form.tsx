@@ -121,7 +121,7 @@ export function ReviewForm({ productId, signedIn }: { productId: string; signedI
   };
 
   return (
-    <form action={onSubmit} className="flex flex-col gap-3 rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+    <form action={onSubmit} className="flex flex-col gap-3 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <h3 className="text-base font-semibold">Write a review</h3>
       <StarRatingInput value={rating} onChange={setRating} disabled={pending} />
       <div className="flex flex-col gap-1">

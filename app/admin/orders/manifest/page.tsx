@@ -68,7 +68,7 @@ export default async function ManifestPage({ searchParams }: ManifestPageProps) 
       </div>
 
       {excluded.length > 0 ? (
-        <div className="rounded-xl bg-white p-4 text-sm ring-1 ring-foreground/10 print:hidden">
+        <div className="rounded-xl bg-card p-4 text-sm ring-1 ring-foreground/10 print:hidden">
           <h2 className="font-semibold">Excluded selections</h2>
           <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
             {excluded.map((e) => (
@@ -81,7 +81,7 @@ export default async function ManifestPage({ searchParams }: ManifestPageProps) 
       ) : null}
 
       {included.length === 0 ? (
-        <div className="rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
+        <div className="rounded-xl bg-card px-6 py-16 text-center ring-1 ring-foreground/10">
           <p className="text-sm text-muted-foreground">
             None of the selected orders are shippable right now.
           </p>
@@ -91,7 +91,7 @@ export default async function ManifestPage({ searchParams }: ManifestPageProps) 
           {included.map((order) => (
             <article
               key={order.orderId}
-              className="manifest-page rounded-xl bg-white p-6 ring-1 ring-foreground/10"
+              className="manifest-page rounded-xl bg-card p-6 ring-1 ring-foreground/10"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>

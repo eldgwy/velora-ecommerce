@@ -24,7 +24,7 @@ function KpiCard({
   sub?: string;
 }) {
   return (
-    <div className="rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+    <div className="rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="mt-1 text-2xl font-semibold">{value}</p>
       {sub ? <p className="mt-1 text-xs text-muted-foreground">{sub}</p> : null}
@@ -40,7 +40,7 @@ export default async function AdminDashboardPage({ searchParams }: DashboardPage
     return (
       <div className="flex flex-col gap-5">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <div className="flex flex-col items-center gap-4 rounded-xl bg-white px-6 py-16 text-center ring-1 ring-foreground/10">
+        <div className="flex flex-col items-center gap-4 rounded-xl bg-card px-6 py-16 text-center ring-1 ring-foreground/10">
           <p className="text-sm text-muted-foreground">{res.ok ? "Please try again." : res.error}</p>
         </div>
       </div>
@@ -103,7 +103,7 @@ export default async function AdminDashboardPage({ searchParams }: DashboardPage
         />
       </div>
 
-      <section className="rounded-xl bg-white p-5 ring-1 ring-foreground/10" aria-label="Sales velocity">
+      <section className="rounded-xl bg-card p-5 ring-1 ring-foreground/10" aria-label="Sales velocity">
         <h2 className="mb-3 text-base font-semibold">Sales velocity (daily GMV, USD)</h2>
         <VelocityChart buckets={velocity} />
       </section>

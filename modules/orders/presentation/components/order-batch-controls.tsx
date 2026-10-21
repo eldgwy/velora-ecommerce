@@ -60,7 +60,7 @@ export function OrderBatchControls({ orders }: { orders: OrderListItem[] }) {
   return (
     <div className="flex flex-col gap-3">
       {selected.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 ring-1 ring-foreground/10">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
           <span className="text-sm font-medium">{selected.size} selected (max 50)</span>
           {!confirming ? (
             <>
@@ -89,7 +89,7 @@ export function OrderBatchControls({ orders }: { orders: OrderListItem[] }) {
         </div>
       ) : null}
 
-      <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-foreground/10">
+      <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-foreground/10">
         <table className="w-full min-w-[840px] text-left text-sm">
           <thead>
             <tr className="border-b border-border text-xs text-muted-foreground">

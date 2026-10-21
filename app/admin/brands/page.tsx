@@ -32,7 +32,7 @@ export default async function BrandsPage() {
       {brands.length === 0 ? (
         <EmptyState title="No brands yet" description="Create one to begin." />
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-foreground/10">
+        <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-foreground/10">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs text-muted-foreground">

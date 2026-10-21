@@ -39,7 +39,7 @@ export default async function CustomerDetailPage({
 
       <CustomerAdminToggles userId={account.id} label={account.email} status={account.status} role={account.role} />
 
-      <section className="flex flex-col gap-1 rounded-xl bg-white p-5 text-sm ring-1 ring-foreground/10">
+      <section className="flex flex-col gap-1 rounded-xl bg-card p-5 text-sm ring-1 ring-foreground/10">
         <h2 className="text-base font-semibold">Profile</h2>
         {account.profile ? (
           <div className="grid gap-1 text-muted-foreground sm:grid-cols-2">
@@ -56,7 +56,7 @@ export default async function CustomerDetailPage({
         )}
       </section>
 
-      <section className="flex flex-col gap-2 rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+      <section className="flex flex-col gap-2 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
         <h2 className="text-base font-semibold">Admin audit trail</h2>
         {events.length === 0 ? (
           <p className="text-sm text-muted-foreground">No status or role changes recorded.</p>

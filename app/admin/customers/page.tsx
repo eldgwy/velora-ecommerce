@@ -72,7 +72,7 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
       {items.length === 0 ? (
         <EmptyState title="No accounts match" description="Search by name or email, or clear the filters." />
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-foreground/10">
+        <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-foreground/10">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs text-muted-foreground">
@@ -119,8 +119,8 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
           <span className="text-muted-foreground">
             Page {page} of {totalPages}
           </span>
-          {page > 1 ? <a href={pageHref(page - 1)} className="rounded-lg border border-border bg-white px-3 py-1.5 hover:bg-muted">← Prev</a> : null}
-          {page < totalPages ? <a href={pageHref(page + 1)} className="rounded-lg border border-border bg-white px-3 py-1.5 hover:bg-muted">Next →</a> : null}
+          {page > 1 ? <a href={pageHref(page - 1)} className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted">← Prev</a> : null}
+          {page < totalPages ? <a href={pageHref(page + 1)} className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted">Next →</a> : null}
         </div>
       ) : null}
     </div>

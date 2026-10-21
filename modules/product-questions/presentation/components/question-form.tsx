@@ -51,7 +51,7 @@ export function QuestionForm({ productId, signedIn }: { productId: string; signe
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl bg-white p-5 ring-1 ring-foreground/10">
+    <div className="flex flex-col gap-2 rounded-xl bg-card p-5 ring-1 ring-foreground/10">
       <h3 className="text-base font-semibold">Ask a question</h3>
       <div className="flex flex-col gap-1">
         <Label htmlFor="product-question">Your question</Label>

@@ -36,7 +36,7 @@ export async function ProductQuestionSection({
       </div>
 
       {list.totalCount === 0 ? (
-        <div className="rounded-xl bg-white px-6 py-10 text-center ring-1 ring-foreground/10">
+        <div className="rounded-xl bg-card px-6 py-10 text-center ring-1 ring-foreground/10">
           <p className="text-sm text-muted-foreground">
             No answered questions yet. Ask below — answers from our team appear here.
           </p>
@@ -47,7 +47,7 @@ export async function ProductQuestionSection({
             {list.items.map((item) => (
               <li
                 key={item.id}
-                className="flex flex-col gap-2 rounded-xl bg-white p-5 ring-1 ring-foreground/10"
+                className="flex flex-col gap-2 rounded-xl bg-card p-5 ring-1 ring-foreground/10"
               >
                 <h3 className="font-semibold">{item.question}</h3>
                 <div className="rounded-lg bg-muted/50 p-3">
