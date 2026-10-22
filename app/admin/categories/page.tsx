@@ -1,10 +1,11 @@
 import { EmptyState } from "@/shared/components/ui/empty-state";
+import { AdminPagination, parsePageParam } from "@/shared/components/ui/pagination";
 
 import Link from "next/link";
 
 import { Button } from "@/shared/components/ui/button";
 import { listCategories } from "@/services/catalog.service";
-import { buildCategoryTree } from "@/modules/catalog/application/queries/category-tree";
+import { buildCategoryTree, pageCategoriesByRoot } from "@/modules/catalog/application/queries/category-tree";
 import { CategoryActiveToggle } from "@/modules/catalog/presentation/components/category-active-toggle";
 
 export const dynamic = "force-dynamic";
@@ -13,9 +14,17 @@ export const metadata = {
   title: "Categories — VELORA Admin",
 };
 
-export default async function CategoriesPage() {
+export default async function CategoriesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
   const categories = await listCategories();
   const tree = buildCategoryTree(categories);
+  // Page by root so a category and its children are never separated.
+  const page = pageCategoriesByRoot(tree, parsePageParam(pageParam));
+  const pageHref = (p: number) => `/admin/categories?page=${p}`;
 
   return (
     <div className="flex flex-col gap-5">
@@ -23,14 +32,14 @@ export default async function CategoriesPage() {
         <div>
           <h1 className="text-2xl font-semibold">Categories</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {categories.length} categor{categories.length === 1 ? "y" : "ies"} · hidden categories
-            leave storefront navigation but keep their children listed
+            {page.totalRoots} root categor{page.totalRoots === 1 ? "y" : "ies"} (with
+            children) · page {page.currentPage} of {page.totalPages}
           </p>
         </div>
         <Button size="sm" render={<Link href="/admin/categories/new">New category</Link>} />
       </div>
 
-      {tree.length === 0 ? (
+      {page.entries.length === 0 ? (
         <EmptyState title="No categories yet" description="Create one to begin." />
       ) : (
         <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-foreground/10">
@@ -46,7 +55,7 @@ export default async function CategoriesPage() {
               </tr>
             </thead>
             <tbody>
-              {tree.map(({ row, depth }) => (
+              {page.entries.map(({ row, depth }) => (
                 <tr key={row.id} className="border-b border-border/50 last:border-0">
                   <td className="px-4 py-3">
                     <Link
@@ -79,6 +88,13 @@ export default async function CategoriesPage() {
           </table>
         </div>
       )}
+
+      <AdminPagination
+        currentPage={page.currentPage}
+        totalPages={page.totalPages}
+        buildHref={pageHref}
+        ariaLabel="Category pages"
+      />
     </div>
   );
 }

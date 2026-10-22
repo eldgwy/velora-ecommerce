@@ -112,9 +112,16 @@ session; all ids/filters/dates validated server-side.
   - Server-paginated + numbered UI: orders, products (new `listAdminProducts`
     service query), inventory, customers, reviews, questions, coupons,
     promotions, collections, banners.
-  - No pagination (full list by design): brands (small bounded list,
-    deterministic sort), categories (tree view), the dashboard, and the
-    order manifest tool.
+  - Numbered pagination, hierarchical slicing: categories — pages are
+    contiguous runs of ROOT categories, each rendered together with its
+    complete subtree so a family can never split across a page boundary
+    (`pageCategoriesByRoot`). Categories are a bounded navigation
+    structure, so the tree is built once per request and sliced by root
+    by design; orphans stay visible on every page they occur on.
+  - Numbered pagination via the shared service-level query:
+    brands (`listAdminBrands`, name ASC with id tie-breaker, page size 20).
+  - No pagination (by design): the dashboard, and the order manifest
+    tool.
 - Service-level requirements: filter/sort first, then `LIMIT/OFFSET`, an
   exact `COUNT` over the same filtered population for totalPages, and a
   deterministic `ORDER BY` with a unique tie-breaker (e.g. products: 

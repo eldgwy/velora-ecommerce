@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/infrastructure/database";
 import {
   brands,
@@ -19,6 +19,44 @@ export type BrandPatch = Partial<Omit<BrandInsertData, "id">>;
 
 export async function listBrands(): Promise<BrandRow[]> {
   return db.select().from(brands);
+}
+
+/** Admin console page size for the brands table. */
+export const ADMIN_BRANDS_PAGE_SIZE = 20;
+
+export interface AdminBrandsPage {
+  items: BrandRow[];
+  total: number;
+  currentPage: number;
+  totalPages: number;
+}
+
+/**
+ * Server-side paginated admin brand listing. Deterministic ordering:
+ * name ASC with id ASC as a unique tie-breaker (two identical names are
+ * otherwise ambiguous under LIMIT/OFFSET). Filter first, then one page
+ * selected via LIMIT/OFFSET with an exact COUNT over the same filtered
+ * population — the whole table is never loaded.
+ */
+export async function listAdminBrands(opts: {
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<AdminBrandsPage> {
+  const page = Math.max(1, Math.floor(opts.page ?? 1));
+  const pageSize = Math.min(Math.max(1, Math.floor(opts.pageSize ?? ADMIN_BRANDS_PAGE_SIZE)), 100);
+
+  const [rows, countRows] = await Promise.all([
+    db.select().from(brands).orderBy(asc(brands.name), asc(brands.id)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)::int` }).from(brands),
+  ]);
+
+  const total = countRows[0]?.count ?? 0;
+  return {
+    items: rows,
+    total,
+    currentPage: page,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
 }
 
 export async function getBrandById(

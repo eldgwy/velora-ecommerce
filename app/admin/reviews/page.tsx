@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { AdminPagination, parsePageParam } from "@/shared/components/ui/pagination";
 
 import { Button } from "@/shared/components/ui/button";

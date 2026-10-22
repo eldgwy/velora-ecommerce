@@ -1,9 +1,10 @@
 import { EmptyState } from "@/shared/components/ui/empty-state";
+import { AdminPagination, parsePageParam } from "@/shared/components/ui/pagination";
 
 import Link from "next/link";
 
 import { Button } from "@/shared/components/ui/button";
-import { listBrands } from "@/services/brand.service";
+import { listAdminBrands } from "@/services/brand.service";
 import { BrandDeleteButton } from "@/modules/catalog/presentation/components/brand-delete-button";
 
 export const dynamic = "force-dynamic";
@@ -12,10 +13,15 @@ export const metadata = {
   title: "Brands — VELORA Admin",
 };
 
-export default async function BrandsPage() {
-  const brands = await listBrands();
-  // Deterministic order for stable pagination-free lists.
-  brands.sort((a, b) => a.name.localeCompare(b.name));
+export default async function BrandsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = parsePageParam(pageParam);
+  const res = await listAdminBrands({ page });
+  const pageHref = (p: number) => `/admin/brands?page=${p}`;
 
   return (
     <div className="flex flex-col gap-5">
@@ -23,13 +29,13 @@ export default async function BrandsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Brands</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {brands.length} brand{brands.length === 1 ? "" : "s"}
+            {res.total} brand{res.total === 1 ? "" : "s"}
           </p>
         </div>
         <Button size="sm" render={<Link href="/admin/brands/new">New brand</Link>} />
       </div>
 
-      {brands.length === 0 ? (
+      {res.items.length === 0 ? (
         <EmptyState title="No brands yet" description="Create one to begin." />
       ) : (
         <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-foreground/10">
@@ -45,7 +51,7 @@ export default async function BrandsPage() {
               </tr>
             </thead>
             <tbody>
-              {brands.map((brand) => (
+              {res.items.map((brand) => (
                 <tr key={brand.id} className="border-b border-border/50 last:border-0">
                   <td className="px-4 py-3">
                     <Link
@@ -68,6 +74,13 @@ export default async function BrandsPage() {
           </table>
         </div>
       )}
+
+      <AdminPagination
+        currentPage={res.currentPage}
+        totalPages={res.totalPages}
+        buildHref={pageHref}
+        ariaLabel="Brand pages"
+      />
     </div>
   );
 }

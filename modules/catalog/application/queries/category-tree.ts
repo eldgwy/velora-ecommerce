@@ -62,3 +62,47 @@ export function buildCategoryTree<T extends CategoryLike>(
 
   return ordered;
 }
+
+export interface CategoryPageResult<T extends CategoryLike> {
+  entries: Array<CategoryTreeEntry<T>>;
+  /** Number of root categories across the whole tree. */
+  totalRoots: number;
+  currentPage: number;
+  totalPages: number;
+}
+
+/**
+ * Pagination for the admin categories tree, sliced by ROOT category so a
+ * family can never split across a page boundary: page N is a contiguous
+ * run of `rootsPerPage` roots, each rendered together with its complete
+ * subtree. Categories are a bounded navigation structure (not event
+ * data), so building the full tree once and slicing roots is by design —
+ * orphans and cycle members must stay visible no matter which page is
+ * requested. Out-of-range pages clamp into the valid range.
+ */
+export function pageCategoriesByRoot<T extends CategoryLike>(
+  entries: Array<CategoryTreeEntry<T>>,
+  rawPage: number,
+  rootsPerPage = 20,
+): CategoryPageResult<T> {
+  const perPage = Math.min(Math.max(1, Math.floor(rootsPerPage)), 100);
+  const totalRoots = entries.filter((e) => e.depth === 0).length;
+  const totalPages = Math.max(1, Math.ceil(totalRoots / perPage));
+  const currentPage = Math.min(Math.max(1, Math.floor(rawPage)), totalPages);
+
+  const pageIndexes: number[] = [];
+  for (const [index, entry] of entries.entries()) {
+    if (entry.depth === 0) pageIndexes.push(index);
+  }
+
+  const chunkIndex = Math.min(currentPage - 1, pageIndexes.length - 1);
+  const start = pageIndexes[Math.max(0, chunkIndex * perPage)] ?? entries.length;
+  const end = pageIndexes[(chunkIndex + 1) * perPage] ?? entries.length;
+
+  return {
+    entries: entries.slice(start, end),
+    totalRoots,
+    currentPage: Math.min(currentPage, totalPages),
+    totalPages,
+  };
+}
