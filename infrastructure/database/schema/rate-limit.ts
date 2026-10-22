@@ -9,7 +9,7 @@ export const rateLimit = pgTable(
   "rate_limit",
   {
     id: text("id").primaryKey(),
-    key: text("key").notNull().unique(),
+    key: text("key").notNull(),
     count: integer("count").default(1).notNull(),
     lastRequest: bigint("last_request", { mode: "number" }).notNull(),
   },

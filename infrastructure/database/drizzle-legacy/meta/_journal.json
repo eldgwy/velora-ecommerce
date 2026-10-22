@@ -1,0 +1,272 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789605442000,
+      "tag": "0000_lyrical_vance_astro",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789838507000,
+      "tag": "0001_loving_roulette",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790714460000,
+      "tag": "0002_nifty_toad_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791306868000,
+      "tag": "0003_new_inhumans",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791472743000,
+      "tag": "0004_new_ezekiel_stane",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791488156000,
+      "tag": "0005_fix_variant_status_and_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791624534000,
+      "tag": "0006_reconcile_user_id_to_text",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791666652000,
+      "tag": "0007_inventory_invariants",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791668279000,
+      "tag": "0008_order_reservation_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791717088000,
+      "tag": "0009_webhook_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791732146000,
+      "tag": "0010_low_stock_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791737903000,
+      "tag": "0011_fix_rate_limit_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791816200000,
+      "tag": "0012_fix_rate_limit_last_request_bigint",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791900000000,
+      "tag": "0013_cart_guest_and_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791900000001,
+      "tag": "0014_cart_missing_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791900000002,
+      "tag": "0015_order_checkout_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791900000003,
+      "tag": "0016_reconcile_declared_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791900000004,
+      "tag": "0017_order_audit_and_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791900000005,
+      "tag": "0018_reconcile_missing_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791900000006,
+      "tag": "0019_notification_retry_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791900000007,
+      "tag": "0020_checkout_financial_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792000000000,
+      "tag": "0021_product_returns",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792100000000,
+      "tag": "0022_coupon_limits_and_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792200000000,
+      "tag": "0023_promotion_constraints_and_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792300000000,
+      "tag": "0024_review_integrity_and_verified_buyer",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792400000000,
+      "tag": "0025_product_questions",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792500000000,
+      "tag": "0026_product_view_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "0027_collection_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792700000000,
+      "tag": "0028_collection_mapping_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792800000000,
+      "tag": "0029_banner_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792900000000,
+      "tag": "0030_products_slug",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792986400000,
+      "tag": "0031_gp26_orphan_sweep_backup",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793419200000,
+      "tag": "0032_audit_actor_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793505600000,
+      "tag": "0033_user_admin_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793592000000,
+      "tag": "0034_auth_emails",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793678400000,
+      "tag": "0035_low_stock_alert_recipients",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793764800000,
+      "tag": "0036_products_active_created",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793851200000,
+      "tag": "0037_cart_recovery_emails",
+      "breakpoints": true
+    }
+  ]
+}

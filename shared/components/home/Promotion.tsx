@@ -8,7 +8,7 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 
-import PromotionImage from "../images/promotion.jpg";
+import PromotionImage from "@/shared/images/promotion.jpg";
 
 gsap.registerPlugin(ScrollTrigger);
 

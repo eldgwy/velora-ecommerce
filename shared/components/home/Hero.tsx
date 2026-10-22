@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { Button } from "../ui/button";
 import { ArrowDown, ArrowRight } from "lucide-react";
-import HeroImage from "../images/hero.jpg";
+import HeroImage from "@/shared/images/hero.jpg";
 import { useGSAP } from "@gsap/react";
 import { SplitText } from "gsap/SplitText";
 import gsap from "gsap";

@@ -15,7 +15,11 @@ const main = async () => {
 }
 
 main().catch((err) => {
+  // Fail closed: an unapplied migration historically exited 0 here, so CI's
+  // "Apply migrations" step succeeded while the database stayed empty
+  // (integration suites then failed with 42P01 "relation does not exist").
   console.error("Migration failed", err);
+  process.exitCode = 1;
 }).finally(async () => {
   await pool.end();
 });
