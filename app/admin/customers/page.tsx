@@ -1,4 +1,5 @@
 import { EmptyState } from "@/shared/components/ui/empty-state";
+import { AdminPagination, parsePageParam } from "@/shared/components/ui/pagination";
 
 import Link from "next/link";
 
@@ -24,7 +25,7 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? (params.status as (typeof STATUSES)[number])
     : undefined;
-  const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
+  const page = parsePageParam(params.page);
 
   const { items, total, totalPages } = await listUsersForAdmin({
     query: params.q,
@@ -114,15 +115,7 @@ export default async function CustomersPage({ searchParams }: CustomersPageProps
         </div>
       )}
 
-      {totalPages > 1 ? (
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">
-            Page {page} of {totalPages}
-          </span>
-          {page > 1 ? <a href={pageHref(page - 1)} className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted">← Prev</a> : null}
-          {page < totalPages ? <a href={pageHref(page + 1)} className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted">Next →</a> : null}
-        </div>
-      ) : null}
+      <AdminPagination currentPage={page} totalPages={totalPages} buildHref={pageHref} ariaLabel="Customer pages" />
     </div>
   );
 }

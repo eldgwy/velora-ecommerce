@@ -1,4 +1,5 @@
 import { EmptyState } from "@/shared/components/ui/empty-state";
+import { AdminPagination, parsePageParam } from "@/shared/components/ui/pagination";
 
 import Link from "next/link";
 
@@ -48,7 +49,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
   )
     ? params.paymentStatus
     : undefined;
-  const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
+  const page = parsePageParam(params.page);
   const res = await getAdminOrdersAction({
     status,
     paymentStatus,
@@ -165,25 +166,7 @@ export default async function AdminOrdersPage({ searchParams }: AdminOrdersPageP
       {totalPages > 1 ? (
         <>
           <Separator />
-          <nav className="flex items-center justify-between text-sm" aria-label="Order pages">
-            {currentPage > 1 ? (
-              <Link className="underline underline-offset-4" href={pageHref(currentPage - 1)}>
-                ← Newer
-              </Link>
-            ) : (
-              <span />
-            )}
-            <span className="text-muted-foreground">
-              Page {currentPage} of {totalPages}
-            </span>
-            {currentPage < totalPages ? (
-              <Link className="underline underline-offset-4" href={pageHref(currentPage + 1)}>
-                Older →
-              </Link>
-            ) : (
-              <span />
-            )}
-          </nav>
+          <AdminPagination currentPage={currentPage} totalPages={totalPages} buildHref={pageHref} ariaLabel="Order pages" />
         </>
       ) : null}
     </div>

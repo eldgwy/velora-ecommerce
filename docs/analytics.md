@@ -21,10 +21,30 @@ binary floating point.
 - **Sales velocity:** daily GMV buckets (UTC-day walls, matching the stored
   timestamp convention so session timezone cannot shift boundaries),
   ascending, no gap-filling; days without qualifying orders have no bucket.
+- **Order status distribution:** counts EVERY order placed in the period
+  (including PENDING and CANCELLED) grouped by the persisted lifecycle
+  status — an operational volume view, separate from the revenue
+  population above.
+- **Payment status distribution:** counts orders in the period by the
+  persisted `payment_status` snapshot on orders (no payment secrets).
+- **Top-selling products:** ranks by GROSS UNITS SOLD on qualifying USD
+  orders in the period, grouped by persisted `order_items.sku` snapshot
+  with `MAX(product_name)` as the label; net sales is the SUM of the
+  persisted line totals. Refunds never retro-adjust units (their revenue
+  impact is already in net revenue); deterministic sku tie-break;
+  cancelled, pending, failed, and non-USD orders never contribute.
 - **Currency:** USD-only system. Non-USD rows in range are counted
   (`excludedNonUsdOrders`) and excluded — never converted.
 - **Periods:** half-open `[from, to)` UTC days, max 90 days; invalid or
   inverted ranges reject loudly.
+- **Dashboard period selector:** `?range=` presets — `today` (the current
+  UTC day), `7d`, `30d` (default), `90d` (the maximum) — each ending at
+  tomorrow's UTC wall so "today" is always complete. An explicit
+  `?from=&to=` custom window (YYYY-MM-DD, the existing convention) always
+  takes precedence over a preset; a one-sided or malformed custom window
+  falls back to the 30-day default instead of extrapolating. The selected
+  preset ONLY supplies bounds — all filters validate against the same
+  business rules listed above.
 
 ## Freshness and caching
 
@@ -70,3 +90,33 @@ session; all ids/filters/dates validated server-side.
 - Batch cap of 50 is a documented proposal, not a business-approved
   policy — see code comment.
 - Single currency; refunds attributed by creation date.
+
+
+## Dashboard pagination (T-? admin consistency upgrade)
+
+- `shared/components/ui/pagination.tsx` renders the numbered pagination
+  used by every admin list page: Previous/Next plus directly selectable
+  page numbers with bounded ellipses (at most 7 numbers + 2 ellipses for
+  any page count) and a "Page x of y" indicator. The active page carries
+  `aria-current="page"`; Previous is disabled on page 1, Next on the last
+  page. Pure server-rendered links — no client JS, preserves all existing
+  query parameters via the page's `buildHref`.
+- `parsePageParam` is the single sanitizer for `?page=`: non-numeric,
+  non-integer, zero, and negative values decode to page 1; absurd values
+  clamp to a bounded ceiling (100,000). Out-of-range pages render an empty
+  list with the real page indicator instead of breaking.
+- URL convention: `page` is additive; pages keep their existing
+  `status`/`q`/`from`/`to`-style parameters untouched. Filter forms submit
+  without `page`, naturally resetting to page 1.
+- Routes by shape (audited):
+  - Server-paginated + numbered UI: orders, products (new `listAdminProducts`
+    service query), inventory, customers, reviews, questions, coupons,
+    promotions, collections, banners.
+  - No pagination (full list by design): brands (small bounded list,
+    deterministic sort), categories (tree view), the dashboard, and the
+    order manifest tool.
+- Service-level requirements: filter/sort first, then `LIMIT/OFFSET`, an
+  exact `COUNT` over the same filtered population for totalPages, and a
+  deterministic `ORDER BY` with a unique tie-breaker (e.g. products: 
+  `created_at DESC, id DESC`). Page size stays 20 per admin page unless a
+  page documents otherwise; page size is clamped server-side (max 100).

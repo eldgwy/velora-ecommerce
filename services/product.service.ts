@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/infrastructure/database";
 import {
   products,
@@ -109,6 +109,66 @@ export async function listProducts(opts: {
   }
 
   return await db.select().from(products);
+}
+
+/** Admin console page size for the products table. */
+export const ADMIN_PRODUCTS_PAGE_SIZE = 20;
+
+export interface AdminProductsPage {
+  items: ProductRow[];
+  total: number;
+  currentPage: number;
+  totalPages: number;
+}
+
+/**
+ * Server-side paginated admin product listing. Deterministic ordering:
+ * created_at DESC with id DESC as a unique tie-breaker (sorting by
+ * created_at alone is ambiguous for identical timestamps). Total is an
+ * exact COUNT over the same filtered population — filtered first, then
+ * one page selected via LIMIT/OFFSET; the whole table is never loaded.
+ */
+export async function listAdminProducts(opts: {
+  status?: "DRAFT" | "ACTIVE" | "ARCHIVE";
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<AdminProductsPage> {
+  const page = Math.max(1, Math.floor(opts.page ?? 1));
+  const pageSize = Math.min(Math.max(1, Math.floor(opts.pageSize ?? ADMIN_PRODUCTS_PAGE_SIZE)), 100);
+  const conditions = [];
+  if (opts.status) {
+    conditions.push(eq(products.status, opts.status));
+  }
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const [rows, countRows] = await Promise.all([
+    db
+      .select()
+      .from(products)
+      .where(whereClause)
+      .orderBy(desc(products.createdAt), desc(products.id))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+    countRowsQuery(whereClause),
+  ]);
+
+  const total = countRows[0]?.count ?? 0;
+  return {
+    items: rows,
+    total,
+    currentPage: page,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+async function countRowsQuery(
+  whereClause: ReturnType<typeof and> | undefined,
+): Promise<Array<{ count: number }>> {
+  const result = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(products)
+    .where(whereClause);
+  return result;
 }
 
 export async function getProductById(

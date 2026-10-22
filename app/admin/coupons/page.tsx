@@ -1,4 +1,5 @@
 import { EmptyState } from "@/shared/components/ui/empty-state";
+import { AdminPagination, parsePageParam } from "@/shared/components/ui/pagination";
 
 import Link from "next/link";
 
@@ -24,7 +25,7 @@ export default async function CouponsPage({ searchParams }: CouponsPageProps) {
   const status = STATUSES.includes(params.status as (typeof STATUSES)[number])
     ? params.status
     : undefined;
-  const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
+  const page = parsePageParam(params.page);
   const res = await listCouponsAction({ query: params.q, status, page, pageSize: 20 });
 
   if (!res.ok || !res.data) {
@@ -123,17 +124,7 @@ export default async function CouponsPage({ searchParams }: CouponsPageProps) {
       {totalPages > 1 ? (
         <>
           <Separator />
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">
-              Page {currentPage} of {totalPages}
-            </span>
-            {currentPage > 1 ? (
-              <Button size="sm" variant="outline" render={<Link href={pageHref(currentPage - 1)}>← Prev</Link>} />
-            ) : null}
-            {currentPage < totalPages ? (
-              <Button size="sm" variant="outline" render={<Link href={pageHref(currentPage + 1)}>Next →</Link>} />
-            ) : null}
-          </div>
+          <AdminPagination currentPage={currentPage} totalPages={totalPages} buildHref={pageHref} ariaLabel="Coupon pages" />
         </>
       ) : null}
     </div>

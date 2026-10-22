@@ -11,20 +11,34 @@ vi.mock("next/cache", () => ({
 }));
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { testDb } from "../_db";
-import { orders, payments, refunds } from "@/infrastructure/database/schema/orders";
+import { orders, orderItems, payments, refunds } from "@/infrastructure/database/schema/orders";
 import { user } from "@/infrastructure/database/schema/auth";
 import {
+  productVariants,
+  products,
+  brands,
+  categories,
+} from "@/infrastructure/database/schema/catalog";
+import {
   getInventoryAlertSummary,
+  getOrderStatusBreakdown,
+  getPaymentStatusBreakdown,
   getSalesSummary,
   getSalesVelocity,
+  getTopSellingProducts,
 } from "@/modules/analytics/application/queries/dashboard";
 
 const SFX = `an-${Date.now()}`;
 let userId = "";
+let catId = "";
+let brandId = "";
+let productId = "";
+const variantIds: string[] = [];
 const orderIds: string[] = [];
+const itemIds: string[] = [];
 
 /**
  * Qualifying population (all USD, created 2026-10-05T12:00Z):
@@ -87,7 +101,35 @@ async function seedOrders() {
   });
 }
 
+/**
+ * Wounded-run hygiene (doctrine from tests/integration/catalog): the
+ * suite's revenue assertions are absolute over a FIXED calendar window,
+ * so fixtures from any earlier interrupted run inside that window would
+ * poison later runs. Purge the broad `AN-` namespace (this file's) before
+ * AND after seeding.
+ */
+async function purgeAnalyticsFixtures() {
+  await testDb.execute(sql`
+    DELETE FROM refunds
+    WHERE payment_id IN (
+      SELECT p.id FROM payments p JOIN orders o ON o.id = p.order_id
+      WHERE o.order_number LIKE 'AN-%'
+    )`);
+  await testDb.execute(sql`
+    DELETE FROM order_items
+    WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'AN-%')`);
+  await testDb.execute(sql`
+    DELETE FROM payments
+    WHERE order_id IN (SELECT id FROM orders WHERE order_number LIKE 'AN-%')`);
+  await testDb.execute(sql`DELETE FROM orders WHERE order_number LIKE 'AN-%'`);
+  await testDb.execute(sql`DELETE FROM product_variant WHERE sku LIKE 'an-sku-%'`);
+  await testDb.execute(sql`DELETE FROM products WHERE slug LIKE 'an-prod-%'`);
+  await testDb.execute(sql`DELETE FROM brand WHERE slug LIKE 'an-brand-%'`);
+  await testDb.execute(sql`DELETE FROM categories WHERE slug LIKE 'an-cat-%'`);
+}
+
 beforeAll(async () => {
+  await purgeAnalyticsFixtures();
   const [u] = await testDb
     .insert(user)
     .values({ id: `an-u-${SFX}`, name: "Analytics", email: `analytics-${SFX}@ex.com` })
@@ -97,6 +139,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await purgeAnalyticsFixtures();
+  if (itemIds.length > 0) {
+    await testDb.delete(orderItems).where(inArray(orderItems.id, itemIds));
+  }
   const payRows = await testDb
     .select({ id: payments.id })
     .from(payments)
@@ -107,6 +153,10 @@ afterAll(async () => {
   }
   await testDb.delete(payments).where(inArray(payments.orderId, orderIds));
   await testDb.delete(orders).where(inArray(orders.id, orderIds));
+  await testDb.delete(productVariants).where(inArray(productVariants.id, variantIds));
+  await testDb.delete(products).where(eq(products.id, productId));
+  await testDb.delete(brands).where(eq(brands.id, brandId));
+  await testDb.delete(categories).where(eq(categories.id, catId));
   await testDb.delete(user).where(eq(user.id, userId));
 });
 
@@ -177,5 +227,124 @@ describe("inventory alerts", () => {
     const summary = await getInventoryAlertSummary();
     expect(summary.open).toBe(summary.pending + summary.processing);
     expect(summary.open).toBeGreaterThanOrEqual(0);
+  });
+});
+
+
+describe("order status breakdown", () => {
+  it("counts every placed order, including PENDING and CANCELLED", async () => {
+    const rows = await getOrderStatusBreakdown(FROM, TO);
+    const byStatus = new Map(rows.map((r) => [r.status, r.count]));
+    // 2 PROCESSING (USD + EUR), 1 each of the rest; EUR counts as volume.
+    expect(byStatus.get("PROCESSING")).toBe(2);
+    expect(byStatus.get("SHIPPED")).toBe(1);
+    expect(byStatus.get("DELIVERED")).toBe(1);
+    expect(byStatus.get("CANCELLED")).toBe(1);
+    expect(byStatus.get("PENDING")).toBe(1);
+    // Deterministic order: count desc, then status asc.
+    expect(rows[0].status).toBe("PROCESSING");
+    const tail = rows.slice(1).map((r) => r.status);
+    expect(tail).toEqual([...tail].sort());
+  });
+
+  it("returns an empty population for out-of-range periods", async () => {
+    const rows = await getOrderStatusBreakdown(
+      new Date("2020-01-01T00:00:00Z"),
+      new Date("2020-01-02T00:00:00Z"),
+    );
+    expect(rows).toEqual([]);
+  });
+});
+
+describe("payment status breakdown", () => {
+  it("aggregates the persisted payment states per order", async () => {
+    const rows = await getPaymentStatusBreakdown(FROM, TO);
+    const byStatus = new Map(rows.map((r) => [r.status, r.count]));
+    expect(byStatus.get("PAID")).toBe(4); // 3 qualifying USD + the EUR order
+    expect(byStatus.get("CANCELLED")).toBe(1);
+    expect(byStatus.get("PENDING")).toBe(1);
+  });
+});
+
+describe("top-selling products", () => {
+  it("ranks by units sold over qualifying USD orders, excluding others", async () => {
+    // Prepare the catalogue chain for realistic FK targets.
+    const [cat] = await testDb
+      .insert(categories)
+      .values({ slug: `an-cat-${SFX}`, name: "AN Cat" })
+      .returning();
+    catId = cat.id;
+    const [br] = await testDb
+      .insert(brands)
+      .values({ slug: `an-brand-${SFX}`, name: "AN Brand" })
+      .returning();
+    brandId = br.id;
+    const [prod] = await testDb
+      .insert(products)
+      .values({
+        slug: `an-prod-${SFX}`,
+        name: "AN Product",
+        status: "ACTIVE",
+        basePrice: "10.00",
+        categoryId: catId,
+        brandId,
+      })
+      .returning();
+    productId = prod.id;
+    const skuA = `an-sku-a-${SFX}`;
+    const skuB = `an-sku-b-${SFX}`;
+    for (const sku of [skuA, skuB]) {
+      const [v] = await testDb
+        .insert(productVariants)
+        .values({ productId, sku, status: "ACTIVE" })
+        .returning();
+      variantIds.push(v.id);
+    }
+    const proc = orderIds[0]; // AN-PROC PROCESSING USD
+    const ship = orderIds[1]; // AN-SHIP SHIPPED USD
+    const cxl = orderIds[3]; // AN-CXL CANCELLED USD
+    const eur = orderIds[5]; // AN-EUR PROCESSING EUR
+    async function line(orderId: string, variantId: string, sku: string, quantity: number, total: string) {
+      const [row] = await testDb
+        .insert(orderItems)
+        .values({
+          orderId,
+          variantId,
+          sku,
+          productName: "AN Product",
+          quantity,
+          unitPrice: (Number(total) / quantity).toFixed(2),
+          totalAmount: total,
+          reservationStatus: "COMMITTED",
+        })
+        .returning();
+      itemIds.push(row.id);
+    }
+    // One line per (order, variant) — order_items is unique on that pair.
+    // A gets 3 units on a qualifying order; B gets 2 on another.
+    await line(proc, variantIds[0], skuA, 3, "30.00");
+    await line(ship, variantIds[1], skuB, 2, "10.00");
+    // 100-unit lines on excluded orders must never surface.
+    await line(cxl, variantIds[0], skuA, 100, "1000.00");
+    await line(eur, variantIds[1], skuB, 100, "100.00");
+
+    const top = await getTopSellingProducts(FROM, TO);
+    expect(top[0]).toMatchObject({ sku: skuA, unitsSold: 3, netSales: "30.00" });
+    expect(top[1]).toMatchObject({ sku: skuB, unitsSold: 2, netSales: "10.00" });
+    expect(top.map((t) => t.sku)).toHaveLength(top.length); // grouped per sku
+  });
+
+  it("honours the limit and returns deterministic tie-breaks", async () => {
+    const top = await getTopSellingProducts(FROM, TO, 2);
+    expect(top).toHaveLength(2);
+    expect(top[0].unitsSold).toBeGreaterThanOrEqual(top[1].unitsSold);
+  });
+
+  it("returns an empty population out of range", async () => {
+    const top = await getTopSellingProducts(
+      new Date("2020-01-01T00:00:00Z"),
+      new Date("2020-01-02T00:00:00Z"),
+    );
+    expect(top).toEqual([]);
   });
 });

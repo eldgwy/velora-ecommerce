@@ -1,4 +1,5 @@
 import { EmptyState } from "@/shared/components/ui/empty-state";
+import { AdminPagination, parsePageParam } from "@/shared/components/ui/pagination";
 
 import Link from "next/link";
 
@@ -19,7 +20,7 @@ interface CollectionsPageProps {
 
 export default async function CollectionsPage({ searchParams }: CollectionsPageProps) {
   const params = await searchParams;
-  const page = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
+  const page = parsePageParam(params.page);
   const isActive =
     params.active === "true" ? true : params.active === "false" ? false : undefined;
   const res = await listCollectionsAction({ query: params.q, isActive, page, pageSize: 20 });
@@ -112,17 +113,7 @@ export default async function CollectionsPage({ searchParams }: CollectionsPageP
       {totalPages > 1 ? (
         <>
           <Separator />
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted-foreground">
-              Page {currentPage} of {totalPages}
-            </span>
-            {currentPage > 1 ? (
-              <Button size="sm" variant="outline" render={<Link href={pageHref(currentPage - 1)}>← Prev</Link>} />
-            ) : null}
-            {currentPage < totalPages ? (
-              <Button size="sm" variant="outline" render={<Link href={pageHref(currentPage + 1)}>Next →</Link>} />
-            ) : null}
-          </div>
+          <AdminPagination currentPage={currentPage} totalPages={totalPages} buildHref={pageHref} ariaLabel="Collection pages" />
         </>
       ) : null}
     </div>

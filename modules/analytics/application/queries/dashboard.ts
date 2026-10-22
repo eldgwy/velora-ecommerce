@@ -165,3 +165,141 @@ export async function getInventoryAlertSummary(): Promise<InventoryAlertSummary>
   const processing = Number(stats.processing) || 0;
   return { open: pending + processing, pending, processing };
 }
+
+/**
+ * Dashboard range presets. The `from`/`to` custom window (the existing
+ * convention) always takes precedence; presets exist so the dashboard can
+ * be navigated without hand-typing dates. All windows are half-open UTC
+ * days `[from, to)` ending at tomorrow's wall so "today" is complete.
+ */
+export const DASHBOARD_RANGE_PRESETS = ["today", "7d", "30d", "90d"] as const;
+export type DashboardRangePreset = (typeof DASHBOARD_RANGE_PRESETS)[number];
+export type DashboardRangeKind = DashboardRangePreset | "custom";
+
+const PRESET_SPAN_DAYS: Record<DashboardRangePreset, number> = {
+  today: 1,
+  "7d": 7,
+  "30d": 30,
+  "90d": 90,
+};
+
+export function isDashboardRangePreset(value: string): value is DashboardRangePreset {
+  return (DASHBOARD_RANGE_PRESETS as readonly string[]).includes(value);
+}
+
+/**
+ * Pure range resolution (no DB): custom `from`/`to` win; otherwise a valid
+ * preset maps to its trailing-day window; anything invalid falls back to
+ * the 30-day window. Returns the raw bounds — business validation
+ * (normalizeReportRange) still runs on the result.
+ */
+export function resolveDashboardRange(
+  input: { range?: string | null; from?: string | null; to?: string | null },
+  now: Date,
+): { from: Date; to: Date; kind: DashboardRangeKind } {
+  const dayStart = (d: Date) =>
+    new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const tomorrow = new Date(dayStart(now).getTime() + 86_400_000);
+
+  if (input.from && input.to && /^\d{4}-\d{2}-\d{2}$/.test(input.from) && /^\d{4}-\d{2}-\d{2}$/.test(input.to)) {
+    return { from: new Date(`${input.from}T00:00:00Z`), to: new Date(`${input.to}T00:00:00Z`), kind: "custom" };
+  }
+
+  const preset = input.range && isDashboardRangePreset(input.range) ? input.range : "30d";
+  const span = PRESET_SPAN_DAYS[preset];
+  return {
+    from: new Date(tomorrow.getTime() - span * 86_400_000),
+    to: tomorrow,
+    kind: preset,
+  };
+}
+
+export interface StatusCountBucket {
+  status: string;
+  count: number;
+}
+
+/**
+ * Order lifecycle distribution: counts EVERY order status including
+ * PENDING and CANCELLED — this is an operational volume view, not a
+ * revenue population (revenue metrics stay in getSalesSummary).
+ */
+export async function getOrderStatusBreakdown(from: Date, to: Date): Promise<StatusCountBucket[]> {
+  const range = normalizeReportRange(from, to);
+  const rows = (await db.execute(sql`
+    SELECT status::text AS status, COUNT(*)::int AS count
+    FROM orders
+    WHERE created_at >= ${range.from.toISOString()}
+      AND created_at < ${range.to.toISOString()}
+    GROUP BY status
+    ORDER BY count DESC, status ASC
+  `)) as unknown as Array<{ status: string; count: number }>;
+  return rows.map((r) => ({ status: r.status, count: Number(r.count) || 0 }));
+}
+
+/**
+ * Payment state distribution over the same period-wide order population
+ * (persisted payment_status snapshot on orders — no payment secrets).
+ */
+export async function getPaymentStatusBreakdown(from: Date, to: Date): Promise<StatusCountBucket[]> {
+  const range = normalizeReportRange(from, to);
+  const rows = (await db.execute(sql`
+    SELECT payment_status::text AS status, COUNT(*)::int AS count
+    FROM orders
+    WHERE created_at >= ${range.from.toISOString()}
+      AND created_at < ${range.to.toISOString()}
+      AND payment_status IS NOT NULL
+    GROUP BY payment_status
+    ORDER BY count DESC, status ASC
+  `)) as unknown as Array<{ status: string; count: number }>;
+  return rows.map((r) => ({ status: r.status, count: Number(r.count) || 0 }));
+}
+
+export interface TopSellingProduct {
+  sku: string;
+  productName: string | null;
+  unitsSold: number;
+  /** SUM of persisted order_items total_amount for qualifying orders. */
+  netSales: string;
+}
+
+/**
+ * Top-selling products ranked by UNITS SOLD (gross units on the persisted
+ * line snapshot) over qualifying USD orders in the period. Refunds do not
+ * retro-adjust units; their revenue impact is already in net revenue.
+ * Deterministic tie-break by sku so equal sellers rank stably. Only
+ * persisted snapshots are read — repriced rows can never appear.
+ */
+export async function getTopSellingProducts(
+  from: Date,
+  to: Date,
+  limit = 5,
+): Promise<TopSellingProduct[]> {
+  const range = normalizeReportRange(from, to);
+  const rows = (await db.execute(sql`
+    SELECT oi.sku AS sku,
+           MAX(oi.product_name) AS "productName",
+           SUM(oi.quantity)::int AS "unitsSold",
+           SUM(oi.total_amount) AS "netSales"
+    FROM order_items AS oi
+    INNER JOIN orders AS o ON o.id = oi.order_id
+    WHERE o.status IN ('PROCESSING', 'SHIPPED', 'DELIVERED')
+      AND o.currency = 'USD'
+      AND o.created_at >= ${range.from.toISOString()}
+      AND o.created_at < ${range.to.toISOString()}
+    GROUP BY oi.sku
+    ORDER BY "unitsSold" DESC, oi.sku ASC
+    LIMIT ${limit}
+  `)) as unknown as Array<{
+    sku: string;
+    productName: string | null;
+    unitsSold: number;
+    netSales: string | null;
+  }>;
+  return rows.map((r) => ({
+    sku: r.sku,
+    productName: r.productName,
+    unitsSold: Number(r.unitsSold) || 0,
+    netSales: new Decimal(r.netSales ?? 0).toFixed(2),
+  }));
+}
