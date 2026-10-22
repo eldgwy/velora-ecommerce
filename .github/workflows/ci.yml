@@ -45,6 +45,22 @@ jobs:
   verify:
     name: Typecheck, lint, unit
     runs-on: ubuntu-latest
+    env:
+      # Unit tests are DB-free but some modules (shared/lib/mail →
+      # config/env) validate the environment AT IMPORT TIME and hard-exit
+      # on invalid values. Provide the same class of non-secret
+      # placeholders the integration job uses; no secrets are needed here.
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://velora_user:velora_ci@localhost:5432/velora_db' }}
+      BETTER_AUTH_URL: ${{ secrets.BETTER_AUTH_URL || 'http://localhost:3000' }}
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET || 'ci-placeholder-not-a-production-secret' }}
+      BETTER_AUTH_API_KEY: ${{ secrets.BETTER_AUTH_API_KEY || 'ci-placeholder-not-a-production-secret' }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST || 'smtp.example.invalid' }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+      SMTP_USER: ${{ secrets.SMTP_USER || 'ci-placeholder@example.invalid' }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS || 'ci-placeholder-not-a-production-secret' }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME || 'ci-placeholder' }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY || 'ci-placeholder' }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET || 'ci-placeholder-not-a-production-secret' }}
     steps:
       - uses: actions/checkout@v4
 

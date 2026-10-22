@@ -115,10 +115,15 @@ describe("VariantSelector add-to-cart", () => {
     vi.clearAllMocks();
   });
 
-  it("keeps Add to Cart disabled until a complete selection resolves", () => {
+  it("keeps every purchase button disabled until a complete selection resolves", () => {
     render(<VariantSelector product={makeProduct()} />);
-    const button = screen.getByRole("button", { name: "Select Options" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    // The purchase row renders Add to Cart plus Buy Now; both share the
+    // incomplete-selection state.
+    const buttons = screen.getAllByRole("button", { name: "Select Options" });
+    expect(buttons.length).toBe(2);
+    for (const button of buttons) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    }
   });
 
   it("enables Add to Cart for a complete in-stock selection and submits the resolved variant", async () => {
@@ -126,8 +131,10 @@ describe("VariantSelector add-to-cart", () => {
     render(<VariantSelector product={makeProduct()} />);
     select("Size", "small");
     select("Color", "red");
-    const button = screen.getByRole("button") as HTMLButtonElement;
+    const button = screen.getByRole("button", { name: "Add to Cart" }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
+    // Buy Now is enabled under the same stock/selection conditions.
+    expect((screen.getByRole("button", { name: "Buy Now" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(button);
     await waitFor(() => {
       expect(mockedAddToCart).toHaveBeenCalledTimes(1);
@@ -135,12 +142,15 @@ describe("VariantSelector add-to-cart", () => {
     expect(mockedAddToCart).toHaveBeenCalledWith({ variantId: "v-small-red", quantity: 1 });
   });
 
-  it("disables Add to Cart when the resolved variant has no stock", () => {
+  it("disables both purchase buttons when the resolved variant has no stock", () => {
     render(<VariantSelector product={makeProduct()} />);
     select("Size", "large");
     select("Color", "red");
-    const button = screen.getByRole("button", { name: "Out of Stock" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    const buttons = screen.getAllByRole("button", { name: "Out of Stock" });
+    expect(buttons.length).toBe(2);
+    for (const button of buttons) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    }
   });
 
   it("still surfaces stock state for complete selections that cannot be purchased", () => {
@@ -197,8 +207,12 @@ describe("VariantSelector add-to-cart", () => {
       ],
     };
     render(<VariantSelector product={product} />);
-    const button = screen.getByRole("button", { name: "Out of Stock" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    // Both purchase buttons carry the out-of-stock state.
+    const buttons = screen.getAllByRole("button", { name: "Out of Stock" });
+    expect(buttons.length).toBe(2);
+    for (const button of buttons) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    }
   });
 
   it("renders Unavailable when an option-less product has no purchasable variant", () => {
@@ -213,7 +227,13 @@ describe("VariantSelector add-to-cart", () => {
       ],
     };
     render(<VariantSelector product={product} />);
-    const button = screen.getByRole("button", { name: "Unavailable" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    const buttons = screen.getAllByRole("button", { name: "Unavailable" });
+    expect(buttons.length).toBe(2);
+    for (const button of buttons) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+    }
+    // Without a purchasable variant nothing may submit to the cart.
+    fireEvent.click(buttons[0]);
+    expect(mockedAddToCart).not.toHaveBeenCalled();
   });
 });
